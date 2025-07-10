@@ -33,6 +33,39 @@ class LevelsTab:
         
         # Load initial data
         self.refresh()
+        
+        # Create frame for adding/editing levels
+        self.edit_frame = ttk.Frame(self.frame)
+        self.edit_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create form fields
+        self.level_number = ttk.Spinbox(self.edit_frame, from_=1, to=100, width=10)
+        self.level_number.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.level_name = ttk.Entry(self.edit_frame, width=40)
+        self.level_name.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.level_description = tk.Text(self.edit_frame, height=5, width=40)
+        self.level_description.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        self.wrong_percentage = ttk.Spinbox(self.edit_frame, from_=0, to=100, width=10)
+        self.wrong_percentage.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.item_speed = ttk.Spinbox(self.edit_frame, from_=0.1, to=10.0, increment=0.1, width=10)
+        self.item_speed.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.max_items = ttk.Spinbox(self.edit_frame, from_=1, to=20, width=10)
+        self.max_items.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Buttons
+        btn_frame = ttk.Frame(self.edit_frame)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.save_button = ttk.Button(btn_frame, text="Kaydet", command=self._save_level)
+        self.save_button.pack(side=tk.RIGHT, padx=5)
+        
+        self.cancel_button = ttk.Button(btn_frame, text="İptal", command=self._cancel_edit)
+        self.cancel_button.pack(side=tk.RIGHT, padx=5)
     
     def _setup_level_list(self) -> None:
         """Set up the level list view."""
@@ -69,13 +102,11 @@ class LevelsTab:
         self.level_tree.bind("<Double-1>", lambda e: self.edit_level())
     
     def _setup_buttons(self) -> None:
-        """Set up the action buttons."""
-        btn_frame = ttk.Frame(self.frame)
-        btn_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        ttk.Button(btn_frame, text="Yeni Seviye", command=self.add_level).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Düzenle", command=self.edit_level).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Sil", command=self.delete_level).pack(side=tk.LEFT, padx=5)
+        """
+        Eski üstteki butonları kaldırır (artık kullanılmayacak).
+        """
+        pass
+
     
     def refresh(self) -> None:
         """Refresh the level list."""
@@ -118,12 +149,9 @@ class LevelsTab:
             messagebox.showerror("Hata", "Oyun bağlamı bulunamadı.")
             return
             
-        dialog = LevelDialog(
-            self.frame, 
-            title="Yeni Seviye Ekle",
-            on_submit=self._handle_add_level
-        )
-        self.frame.wait_window(dialog.top)
+        self._clear_form()
+        self.save_button.config(text="Kaydet")
+        self.edit_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
     
     def edit_level(self) -> None:
         """Edit the selected level."""
@@ -136,13 +164,9 @@ class LevelsTab:
             messagebox.showerror("Hata", "Seviye bulunamadı.")
             return
         
-        dialog = LevelDialog(
-            self.frame,
-            title="Seviyeyi Düzenle",
-            level=level,
-            on_submit=self._handle_edit_level
-        )
-        self.frame.wait_window(dialog.top)
+        self._load_data(level)
+        self.save_button.config(text="Güncelle")
+        self.edit_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
     
     def delete_level(self) -> None:
         """Delete the selected level."""
@@ -160,39 +184,66 @@ class LevelsTab:
         else:
             messagebox.showerror("Hata", "Seviye silinirken bir hata oluştu.")
     
-    def _handle_add_level(self, level_data: Dict[str, Any]) -> None:
-        """Handle adding a new level."""
+    def _save_level(self) -> None:
+        """Save the level."""
         try:
-            # Get the current game ID from the parent window
-            parent = self.frame.winfo_toplevel()
-            if not hasattr(parent, 'current_game_id'):
-                messagebox.showerror("Hata", "Oyun bağlamı bulunamadı.")
-                return
-                
-            # Add the current game ID to the level data
-            level_data['game_id'] = parent.current_game_id
+            level_data = {
+                'level_number': int(self.level_number.get()),
+                'level_name': self.level_name.get().strip(),
+                'level_description': self.level_description.get('1.0', tk.END).strip(),
+                'wrong_answer_percentage': int(self.wrong_percentage.get()),
+                'item_speed': float(self.item_speed.get()),
+                'max_items_on_screen': int(self.max_items.get())
+            }
             
-            self.level_service.create_level(level_data)
-            messagebox.showinfo("Başarılı", "Seviye başarıyla eklendi.")
-            self.refresh()
-        except Exception as e:
-            messagebox.showerror("Hata", f"Seviye eklenirken bir hata oluştu: {str(e)}")
-    
-    def _handle_edit_level(self, level_data: Dict[str, Any]) -> None:
-        """Handle editing an existing level."""
-        level_id = self.get_selected_level_id()
-        if not level_id:
-            return
-        
-        try:
-            updated = self.level_service.update_level(level_id, level_data)
-            if updated:
-                messagebox.showinfo("Başarılı", "Seviye başarıyla güncellendi.")
-                self.refresh()
+            if not level_data['level_name']:
+                messagebox.showerror("Hata", "Lütfen bir seviye adı girin.")
+                return
+            
+            if self.save_button.cget('text') == "Kaydet":
+                self.level_service.add_level(level_data)
             else:
-                messagebox.showerror("Hata", "Seviye güncellenirken bir hata oluştu.")
-        except Exception as e:
-            messagebox.showerror("Hata", f"Seviye güncellenirken bir hata oluştu: {str(e)}")
+                level_id = self.get_selected_level_id()
+                self.level_service.update_level(level_id, level_data)
+            
+            self.refresh()
+            self._cancel_edit()
+            
+        except ValueError as e:
+            messagebox.showerror("Hata", f"Geçersiz değer: {str(e)}")
+    
+    def _cancel_edit(self) -> None:
+        """Cancel editing."""
+        self.edit_frame.pack_forget()
+    
+    def _clear_form(self) -> None:
+        """Clear the form."""
+        self.level_number.delete(0, tk.END)
+        self.level_name.delete(0, tk.END)
+        self.level_description.delete('1.0', tk.END)
+        self.wrong_percentage.delete(0, tk.END)
+        self.item_speed.delete(0, tk.END)
+        self.max_items.delete(0, tk.END)
+    
+    def _load_data(self, level: Dict[str, Any]) -> None:
+        """Load level data into the form."""
+        self.level_number.delete(0, tk.END)
+        self.level_number.insert(0, str(level.get('level_number', 1)))
+        
+        self.level_name.delete(0, tk.END)
+        self.level_name.insert(0, level.get('level_name', ''))
+        
+        self.level_description.delete('1.0', tk.END)
+        self.level_description.insert('1.0', level.get('level_description', ''))
+        
+        self.wrong_percentage.delete(0, tk.END)
+        self.wrong_percentage.insert(0, str(level.get('wrong_answer_percentage', 20)))
+        
+        self.item_speed.delete(0, tk.END)
+        self.item_speed.insert(0, str(level.get('item_speed', 2.0)))
+        
+        self.max_items.delete(0, tk.END)
+        self.max_items.insert(0, str(level.get('max_items_on_screen', 5)))
 
 
 class LevelDialog:

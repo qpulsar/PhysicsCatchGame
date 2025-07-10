@@ -93,7 +93,12 @@ class MainWindow:
     """Main application window for the game editor."""
     
     def _on_game_added(self, game_name: str, game_description: str = "") -> None:
-        """Handle adding a new game with optional description."""
+        """
+        Yeni bir oyun eklendiğinde arayüzü ve ilgili değişkenleri günceller.
+        Args:
+            game_name (str): Eklenen oyunun adı.
+            game_description (str): Eklenen oyunun açıklaması (opsiyonel).
+        """
         try:
             # Validate game name
             if not game_name or not game_name.strip():
@@ -183,14 +188,16 @@ class MainWindow:
         selector_frame.pack_propagate(True)
     
     def _on_game_selected(self, game_id: int) -> None:
-        """Handle game selection change.
-        
+        """
+        Oyun seçildiğinde ilgili ID'yi hem MainWindow hem de kök widget'a (root) aktarır, başlığı ve servisleri günceller.
         Args:
-            game_id: ID of the selected game.
+            game_id: Seçilen oyunun ID'si.
         """
         try:
-            # Update the current game ID first
+            # Mevcut oyun ID'sini güncelle
             self.current_game_id = game_id
+            # Kök widget'a da oyun ID'sini aktar
+            setattr(self.root, "current_game_id", game_id)
             
             # Update window title with the selected game name
             game = self.game_service.get_game(game_id)
@@ -246,8 +253,8 @@ class MainWindow:
             for key, value in default_settings.items():
                 self.game_service.update_setting(game.id, key, value)
             
-            # Refresh the game selector
-            self.game_selector.refresh()
+            # Oyun seçim kutusunu güncelle
+            self.game_selector.refresh_games()
             
             # Select the new game
             self.game_selector.game_var.set(game_name)
