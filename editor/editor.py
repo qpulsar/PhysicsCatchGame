@@ -667,7 +667,6 @@ if __name__ == "__main__":
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'game_data.db')
     db_manager = DatabaseManager(db_path)
 
-    app = LevelEditor(root, DB_PATH=db_path)
-    root.mainloop()
-
+#    app = LevelEditor(root, DB_PATH=db_path)
+    app = MainWindow(root, db_manager)
     root.mainloop()
