@@ -206,15 +206,25 @@ class LevelsTab:
             messagebox.showerror("Hata", "Seviye silinirken bir hata oluştu.")
     
     def _save_level(self) -> None:
-        """Save the level."""
+        """
+        Seviye kaydetme işlemini gerçekleştirir. Seçili oyunun game_id'sini parent pencereden alır ve level_data'ya ekler.
+        """
         try:
+            # Parent pencereden current_game_id'yi al
+            parent = self.frame.winfo_toplevel()
+            if hasattr(parent, 'current_game_id'):
+                game_id = parent.current_game_id
+            else:
+                messagebox.showerror("Hata", "Oyun bağlamı bulunamadı.")
+                return
             level_data = {
                 'level_number': int(self.level_number.get()),
                 'level_name': self.level_name.get().strip(),
                 'level_description': self.level_description.get('1.0', tk.END).strip(),
                 'wrong_answer_percentage': int(self.wrong_percentage.get()),
                 'item_speed': float(self.item_speed.get()),
-                'max_items_on_screen': int(self.max_items.get())
+                'max_items_on_screen': int(self.max_items.get()),
+                'game_id': game_id,
             }
 
             if not level_data['level_name']:
@@ -378,6 +388,12 @@ class LevelDialog:
     
     def _on_submit(self) -> None:
         """Handle form submission."""
+        parent = self.frame.winfo_toplevel()
+        if hasattr(parent, 'current_game_id'):
+            game_id = parent.current_game_id
+        else:
+            messagebox.showerror("Hata", "Oyun bağlamı bulunamadı.")
+            return
         try:
             level_data = {
                 'level_number': int(self.level_number.get()),
@@ -385,7 +401,8 @@ class LevelDialog:
                 'level_description': self.level_description.get('1.0', tk.END).strip(),
                 'wrong_answer_percentage': int(self.wrong_percentage.get()),
                 'item_speed': float(self.item_speed.get()),
-                'max_items_on_screen': int(self.max_items.get())
+                'max_items_on_screen': int(self.max_items.get()),
+                'game_id': game_id,
             }
             
             if not level_data['level_name']:
