@@ -78,17 +78,50 @@ class ExpressionsTab:
         self.expr_tree.configure(yscrollcommand=scrollbar.set)
         
         # Double-click to edit
-        self.expr_tree.bind("<Double-1>", lambda e: self.edit_expression())
-    
+        self.expr_tree.bind("<Double-1>", lambda e: self._on_tree_double_click())
+
+        # Ensure the inline edit frame and widgets are always created
+        self._setup_inline_edit_frame()
+
     def _setup_buttons(self) -> None:
         """Set up the action buttons."""
         btn_frame = ttk.Frame(self.frame)
         btn_frame.pack(fill=tk.X, padx=5, pady=5)
         
         ttk.Button(btn_frame, text="İfade Ekle", command=self.add_expression).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Düzenle", command=self.edit_expression).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Sil", command=self.delete_expression).pack(side=tk.LEFT, padx=5)
     
+    def _setup_inline_edit_frame(self) -> None:
+        """Set up the inline add/edit frame."""
+        self.edit_frame = ttk.Frame(self.frame)
+        self.edit_frame.pack(fill=tk.X, padx=5, pady=(0, 10))
+
+        # Labels
+        ttk.Label(self.edit_frame, text="İfade:").grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        ttk.Label(self.edit_frame, text="Doğru mu?").grid(row=0, column=1, padx=5, pady=2, sticky="w")
+
+        # Entry and checkbox
+        self.expression_entry = tk.Text(self.edit_frame, height=2, width=40)
+        self.expression_entry.grid(row=1, column=0, padx=5, pady=2, sticky="ew")
+        self.is_correct_var = tk.BooleanVar(value=True)
+        self.is_correct_checkbox = ttk.Checkbutton(self.edit_frame, variable=self.is_correct_var)
+        self.is_correct_checkbox.grid(row=1, column=1, padx=5, pady=2, sticky="w")
+
+        # Buttons
+        self.save_button = ttk.Button(self.edit_frame, text="Kaydet", command=self._save_expression)
+        self.save_button.grid(row=1, column=2, padx=5, pady=2)
+        self.cancel_button = ttk.Button(self.edit_frame, text="İptal", command=self._cancel_edit)
+        self.cancel_button.grid(row=1, column=3, padx=5, pady=2)
+
+        # Internal state: None for add, expr_id for edit
+        self._editing_expr_id = None
+
+        # Make columns expand
+        self.edit_frame.columnconfigure(0, weight=1)
+        self.edit_frame.columnconfigure(1, weight=0)
+        self.edit_frame.columnconfigure(2, weight=0)
+        self.edit_frame.columnconfigure(3, weight=0)
+
     def refresh_levels(self) -> None:
         """Refresh the level list in the combo box."""
         # Get the current game ID from the parent window
@@ -183,52 +216,84 @@ class ExpressionsTab:
         return int(self.expr_tree.item(selected[0], "tags")[0])
     
     def add_expression(self) -> None:
-        """Add a new expression."""
+        """Switch to add mode in the inline form."""
         if not self.current_level_id:
             messagebox.showwarning("Uyarı", "Lütfen önce bir seviye seçin.")
             return
-        
-        # Get the current level to show in the dialog title
-        level_name = ""
-        parent = self.frame.winfo_toplevel()
-        if hasattr(parent, 'current_game_id'):
-            try:
-                level = self.level_service.get_level(self.current_level_id)
-                if level:
-                    level_name = f" - {level.level_name}"
-            except:
-                pass
-        
-        dialog = ExpressionDialog(
-            self.frame, 
-            title=f"Yeni İfade Ekle{level_name}",
-            on_submit=self._handle_add_expression
-        )
-        self.frame.wait_window(dialog.top)
-    
+        self._editing_expr_id = None
+        self._clear_edit_form()
+        self.save_button.config(text="Kaydet")
+        self.edit_frame.lift()
+
     def edit_expression(self) -> None:
-        """Edit the selected expression."""
+        """Switch to edit mode in the inline form for the selected expression."""
         if not self.current_level_id:
             messagebox.showwarning("Uyarı", "Lütfen önce bir seviye seçin.")
             return
-        
         expr_id = self.get_selected_expression_id()
         if not expr_id:
             return
-        
         expr = self.expression_service._get_expression(expr_id)
         if not expr:
             messagebox.showerror("Hata", "İfade bulunamadı.")
             return
-        
-        dialog = ExpressionDialog(
-            self.frame,
-            title="İfadeyi Düzenle",
-            expression=expr.expression,
-            is_correct=expr.is_correct,
-            on_submit=self._handle_edit_expression
-        )
-        self.frame.wait_window(dialog.top)
+        self._editing_expr_id = expr_id
+        self._fill_edit_form(expr)
+        self.save_button.config(text="Güncelle")
+        self.edit_frame.lift()
+
+    def _on_tree_double_click(self):
+        self.edit_expression()
+
+    def _save_expression(self):
+        """Save or update the expression based on current form state."""
+        expr_text = self.expression_entry.get('1.0', tk.END).strip()
+        is_correct = self.is_correct_var.get()
+        if not self.current_level_id:
+            messagebox.showwarning("Uyarı", "Lütfen önce bir seviye seçin.")
+            return
+        if not expr_text:
+            messagebox.showwarning("Uyarı", "Lütfen geçerli bir ifade girin.")
+            return
+        if self._editing_expr_id is None:
+            # Add
+            try:
+                self.expression_service.add_expression(self.current_level_id, expr_text, is_correct)
+                messagebox.showinfo("Başarılı", "İfade başarıyla eklendi.")
+                self.refresh_expressions()
+                self._clear_edit_form()
+                self.save_button.config(text="Kaydet")
+            except Exception as e:
+                messagebox.showerror("Hata", f"İfade eklenirken bir hata oluştu: {str(e)}")
+        else:
+            # Edit
+            try:
+                updated = self.expression_service.update_expression(self._editing_expr_id, expr_text, is_correct)
+                if updated:
+                    messagebox.showinfo("Başarılı", "İfade başarıyla güncellendi.")
+                    self.refresh_expressions()
+                    self._clear_edit_form()
+                    self.save_button.config(text="Kaydet")
+                    self._editing_expr_id = None
+                else:
+                    messagebox.showerror("Hata", "İfade güncellenirken bir hata oluştu.")
+            except Exception as e:
+                messagebox.showerror("Hata", f"İfade güncellenirken bir hata oluştu: {str(e)}")
+
+    def _cancel_edit(self):
+        self._clear_edit_form()
+        self.save_button.config(text="Kaydet")
+        self._editing_expr_id = None
+
+    def _clear_edit_form(self):
+        self.expression_entry.delete('1.0', tk.END)
+        self.is_correct_var.set(True)
+
+    def _fill_edit_form(self, expr):
+        self.expression_entry.delete('1.0', tk.END)
+        self.expression_entry.insert('1.0', getattr(expr, 'expression', ''))
+        self.is_correct_var.set(getattr(expr, 'is_correct', True))
+
     
     def delete_expression(self) -> None:
         """Delete the selected expression."""

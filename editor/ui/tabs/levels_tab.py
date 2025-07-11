@@ -37,33 +37,54 @@ class LevelsTab:
         # Create frame for adding/editing levels
         self.edit_frame = ttk.Frame(self.frame)
         self.edit_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Create form fields
-        self.level_number = ttk.Spinbox(self.edit_frame, from_=1, to=100, width=10)
-        self.level_number.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.level_name = ttk.Entry(self.edit_frame, width=40)
-        self.level_name.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.level_description = tk.Text(self.edit_frame, height=5, width=40)
-        self.level_description.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        self.wrong_percentage = ttk.Spinbox(self.edit_frame, from_=0, to=100, width=10)
-        self.wrong_percentage.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.item_speed = ttk.Spinbox(self.edit_frame, from_=0.1, to=10.0, increment=0.1, width=10)
-        self.item_speed.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.max_items = ttk.Spinbox(self.edit_frame, from_=1, to=20, width=10)
-        self.max_items.pack(fill=tk.X, padx=5, pady=5)
-        
+
+        # Create a frame for the form fields (for better grid control)
+        form_frame = ttk.Frame(self.edit_frame)
+        form_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Labels (column headers)
+        labels = [
+            ("Seviye No", 0),
+            ("Seviye Adı", 1),
+            ("Açıklama", 2),
+            ("Yanlış Cevap %", 3),
+            ("Hız", 4),
+            ("Maks. Öğe", 5)
+        ]
+        for text, col in labels:
+            lbl = ttk.Label(form_frame, text=text)
+            lbl.grid(row=0, column=col, padx=5, pady=(0,2), sticky="n")
+
+        # Entry widgets aligned horizontally
+        self.level_number = ttk.Spinbox(form_frame, from_=1, to=100, width=8)
+        self.level_number.grid(row=1, column=0, padx=5, pady=2, sticky="ew")
+
+        self.level_name = ttk.Entry(form_frame, width=18)
+        self.level_name.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
+
+        self.level_description = tk.Text(form_frame, height=2, width=18)
+        self.level_description.grid(row=1, column=2, padx=5, pady=2, sticky="ew")
+
+        self.wrong_percentage = ttk.Spinbox(form_frame, from_=0, to=100, width=8)
+        self.wrong_percentage.grid(row=1, column=3, padx=5, pady=2, sticky="ew")
+
+        self.item_speed = ttk.Spinbox(form_frame, from_=0.1, to=10.0, increment=0.1, width=8)
+        self.item_speed.grid(row=1, column=4, padx=5, pady=2, sticky="ew")
+
+        self.max_items = ttk.Spinbox(form_frame, from_=1, to=20, width=8)
+        self.max_items.grid(row=1, column=5, padx=5, pady=2, sticky="ew")
+
+        # Make columns expand equally
+        for i in range(6):
+            form_frame.columnconfigure(i, weight=1)
+
         # Buttons
         btn_frame = ttk.Frame(self.edit_frame)
         btn_frame.pack(fill=tk.X, padx=5, pady=5)
-        
+
         self.save_button = ttk.Button(btn_frame, text="Kaydet", command=self._save_level)
         self.save_button.pack(side=tk.RIGHT, padx=5)
-        
+
         self.cancel_button = ttk.Button(btn_frame, text="İptal", command=self._cancel_edit)
         self.cancel_button.pack(side=tk.RIGHT, padx=5)
     
@@ -195,27 +216,29 @@ class LevelsTab:
                 'item_speed': float(self.item_speed.get()),
                 'max_items_on_screen': int(self.max_items.get())
             }
-            
+
             if not level_data['level_name']:
                 messagebox.showerror("Hata", "Lütfen bir seviye adı girin.")
                 return
-            
+
             if self.save_button.cget('text') == "Kaydet":
-                self.level_service.add_level(level_data)
+                self.level_service.create_level(level_data)
+                self.refresh()
+                self._clear_form()  # Keep frame visible, just clear
             else:
                 level_id = self.get_selected_level_id()
                 self.level_service.update_level(level_id, level_data)
-            
-            self.refresh()
-            self._cancel_edit()
-            
+                self.refresh()
+                self._clear_form()
+                self.save_button.config(text="Kaydet")  # Reset to add mode
+                # Frame remains visible for new entry
         except ValueError as e:
             messagebox.showerror("Hata", f"Geçersiz değer: {str(e)}")
-    
+
     def _cancel_edit(self) -> None:
         """Cancel editing."""
         self.edit_frame.pack_forget()
-    
+
     def _clear_form(self) -> None:
         """Clear the form."""
         self.level_number.delete(0, tk.END)
@@ -225,25 +248,31 @@ class LevelsTab:
         self.item_speed.delete(0, tk.END)
         self.max_items.delete(0, tk.END)
     
-    def _load_data(self, level: Dict[str, Any]) -> None:
-        """Load level data into the form."""
+    def _load_data(self, level) -> None:
+        """Load level data into the form. Supports both dict and Level object."""
+        def get_value(obj, key, default=None):
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            else:
+                return getattr(obj, key, default)
+
         self.level_number.delete(0, tk.END)
-        self.level_number.insert(0, str(level.get('level_number', 1)))
+        self.level_number.insert(0, str(get_value(level, 'level_number', 1)))
         
         self.level_name.delete(0, tk.END)
-        self.level_name.insert(0, level.get('level_name', ''))
+        self.level_name.insert(0, get_value(level, 'level_name', ''))
         
         self.level_description.delete('1.0', tk.END)
-        self.level_description.insert('1.0', level.get('level_description', ''))
+        self.level_description.insert('1.0', get_value(level, 'level_description', ''))
         
         self.wrong_percentage.delete(0, tk.END)
-        self.wrong_percentage.insert(0, str(level.get('wrong_answer_percentage', 20)))
+        self.wrong_percentage.insert(0, str(get_value(level, 'wrong_answer_percentage', 20)))
         
         self.item_speed.delete(0, tk.END)
-        self.item_speed.insert(0, str(level.get('item_speed', 2.0)))
+        self.item_speed.insert(0, str(get_value(level, 'item_speed', 2.0)))
         
         self.max_items.delete(0, tk.END)
-        self.max_items.insert(0, str(level.get('max_items_on_screen', 5)))
+        self.max_items.insert(0, str(get_value(level, 'max_items_on_screen', 5)))
 
 
 class LevelDialog:
