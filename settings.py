@@ -54,20 +54,3 @@ ALL_QUANTITIES = {
     "Skaler Büyüklükler": SKALER_LIST,
     "Vektörel Büyüklükler": VEKTOREL_LIST
 }
-
-IMAGE_FILENAME_MAP = {
-    "Akım Şiddeti": "ELEKTRİKAKIMI", "Işık Şiddeti": "IŞIKŞİDDETİ", "Kütle": "KÜTLE",
-    "Madde Miktarı": "MADDE MİKTARI", "Sıcaklık": "SICAKLIK", "Uzunluk": "UZUNLUK", "Zaman": "ZAMAN",
-    "Alan": "ALAN", "Ağırlık": "AĞIRLIK", "Basınç": "BASINC", "Elektrik Alan": "ELEKTRİKALAN",
-    "Enerji": "ENERJİ", "Frekans": "FREKANS", "Güç": "GÜÇ", "Hacim": "HACİM", "Hız": "HIZ",
-    "Isı": "ISI", "Kuvvet": "KUVVET", "Manyetik Alan": "MANYETİK ALAN", "Tork": "MOMENT",
-    "Momentum": "MOMENTUM", "Sürat": "SÜRAT", "Yer Değiştirme": "YERDEĞİŞTİRME",
-    "Özkütle": "YOĞUNLUK", "Yüzey Alanı": "YÜZEYALANI", "Özısı": "ÖZISI", "İvme": "İVME", "İş": "İŞ"
-}
-
-QUANTITY_TO_FOLDER_MAP = {}
-for q in TEMEL_LIST:
-    QUANTITY_TO_FOLDER_MAP[q] = "TEMEL BÜYÜKLÜKLER_BUTON"
-for q in TURETILMIS_LIST:
-    if q not in QUANTITY_TO_FOLDER_MAP:
-        QUANTITY_TO_FOLDER_MAP[q] = "TÜRETİLMİŞ BÜYÜKÜLKER_BUTON"
