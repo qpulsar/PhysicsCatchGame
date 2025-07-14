@@ -10,6 +10,8 @@ from level_manager import LevelManager
 from ui_manager import UIManager
 from utils import draw_text
 
+
+# GAME START
 # --- Oyun Yöneticilerini Başlat ---
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
