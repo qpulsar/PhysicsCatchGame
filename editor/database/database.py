@@ -97,6 +97,32 @@ class DatabaseManager:
             FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE,
             UNIQUE (game_id, key)
         )''')
+
+        # Create sprites table to store sprite sheets
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sprites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE
+        )''')
+
+        # Create sprite_definitions table to store individual sprite coordinates
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sprite_definitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sprite_id INTEGER NOT NULL,
+            expression_id INTEGER NOT NULL UNIQUE,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            width INTEGER NOT NULL,
+            height INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (sprite_id) REFERENCES sprites (id) ON DELETE CASCADE,
+            FOREIGN KEY (expression_id) REFERENCES expressions (id) ON DELETE CASCADE
+        )''')
     
     def _initialize_default_data(self, cursor: sqlite3.Cursor) -> None:
         """Initialize default game and settings."""

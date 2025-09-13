@@ -1,3 +1,4 @@
 pygame
 pyserial
 pillow
+sv-ttk

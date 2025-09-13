@@ -1,0 +1,11 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+1- oyunda python pygame kullan, tasarımda tkinter ve ttk kullan
+2- minimum değişiklik ile komutları yerine getirmeye çalış
+3- main.py oyunu başlatır.
+4- ./editor/editor.py tasarım ekranını başlatır.
+5- Mümkün olduğunca responsive tasarım yap.
+6- plan.md dosyasına uygun şekilde ilerle. Yapılan görevi işaretle.

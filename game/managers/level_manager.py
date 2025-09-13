@@ -6,22 +6,36 @@ item spawning, and level completion logic for the game.
 
 import random
 import pygame
-from typing import Dict, List, Optional, Set, Tuple, TypedDict
+import sqlite3
+from typing import Dict, List, Optional, Tuple
 
 from settings import *
 
+# This is a simplified version of the DatabaseManager from the editor
+# to avoid complex dependencies.
+class LevelDatabase:
+    def __init__(self, db_path='game_data.db'):
+        self.db_path = db_path
 
-class SpawnEvent(TypedDict):
-    """Type definition for spawn events.
-    
-    Attributes:
-        time: The game time when the item should spawn.
-        item_text: The text of the item to spawn.
-        category: The category of the item.
-    """
-    time: int
-    item_text: str
-    category: str
+    def _get_connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def get_level_data(self, game_id: int, level_number: int) -> Optional[sqlite3.Row]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT * FROM levels WHERE game_id = ? AND level_number = ?',
+                (game_id, level_number)
+            )
+            return cursor.fetchone()
+
+    def get_expressions_for_level(self, level_id: int) -> List[sqlite3.Row]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM expressions WHERE level_id = ?', (level_id,))
+            return cursor.fetchall()
 
 class LevelManager:
     """Manages game levels, item spawning, and level progression.
@@ -60,24 +74,22 @@ class LevelManager:
     
     def __init__(self):
         """Initialize a new LevelManager with default values."""
+        self.db = LevelDatabase()
         self.level: int = 1
-        self.target_category: Optional[str] = None
+        self.game_id: Optional[int] = None
+        self.target_category: Optional[str] = None # Will be based on level description or a new DB field
         self.correct_items: List[str] = []
+        self.wrong_items: List[str] = []
         self.dropped_correct: List[str] = []
         self.caught_correct: List[str] = []
-        self.level_queue: List[str] = []  # Queue of items to be respawned
-        self.available_quantities: Dict[str, List[str]] = {
-            key: value[:] for key, value in ALL_QUANTITIES.items()
-        }
-        
-        # Spawn management
-        self.spawn_events: List[SpawnEvent] = []
+        self.level_queue: List[str] = []
+        self.spawn_events: List[dict] = []
         self.spawn_index: int = 0
         self.item_spawned_count: int = 0
         self.total_items_to_spawn: int = 0
         self.spawn_ready: bool = False
     
-    def setup_level(self, level: int) -> None:
+    def setup_level(self, level_number: int, game_id: int):
         """Set up a new level with the given level number.
         
         Args:
@@ -86,15 +98,25 @@ class LevelManager:
         Raises:
             KeyError: If the level number is invalid.
         """
-        if level not in LEVEL_TARGETS:
-            raise ValueError(f"Invalid level number: {level}")
-            
-        self.level = level
-        self.target_category = LEVEL_TARGETS[level]
-        self.correct_items = ALL_QUANTITIES[self.target_category][:]
+        self.level = level_number
+        self.game_id = game_id
+
+        level_data = self.db.get_level_data(game_id, level_number)
+        if not level_data:
+            print(f"Error: Level {level_number} for game {game_id} not found in database.")
+            # Handle this case, e.g., by ending the game or loading a default.
+            return
+
+        level_id = level_data['id']
+        self.target_category = level_data['level_name'] # Using level name as target for now
+        
+        all_expressions = self.db.get_expressions_for_level(level_id)
+        self.correct_items = [e['expression'] for e in all_expressions if e['is_correct']]
+        self.wrong_items = [e['expression'] for e in all_expressions if not e['is_correct']]
+
         self.dropped_correct = []
         self.caught_correct = []
-        self.level_queue = self.correct_items.copy()  # Initialize level queue with correct items
+        self.level_queue = self.correct_items.copy()
         
         # Reset spawn state
         self.spawn_events = []
@@ -103,14 +125,7 @@ class LevelManager:
         self.total_items_to_spawn = 0
         self.spawn_ready = False
         
-        # Reset available quantities
-        self.available_quantities = {
-            key: value[:] for key, value in ALL_QUANTITIES.items()
-        }
-        
-        print(f"Level {level} setup complete. Target category: {self.target_category}")
-        print(f"Correct items: {', '.join(self.correct_items)}")
-        print(f"Level queue initialized with {len(self.level_queue)} items")
+        print(f"Level {level_number} for Game {game_id} setup complete. Target: {self.target_category}")
     
     def get_new_item(self) -> Tuple[str, str]:
         """Get a new item for the current level.
@@ -125,36 +140,22 @@ class LevelManager:
             - 40% chance to spawn wrong items from other levels
             - Ensures wrong items are different from correct ones
         """
-        # Always try to spawn remaining correct items first
-        remaining_correct = [
-            item for item in self.correct_items 
-            if item not in self.caught_correct and item not in self.dropped_correct
-        ]
+        # Simplified logic: 60% chance for a correct item, 40% for wrong
+        if random.random() > 0.4 and self.correct_items:
+            # Check for items that still need to be spawned/caught
+            remaining_correct = [item for item in self.correct_items if item not in self.caught_correct]
+            if remaining_correct:
+                 return random.choice(remaining_correct), self.target_category
+
+        if self.wrong_items:
+            return random.choice(self.wrong_items), "wrong" # Category for wrong items
         
-        if remaining_correct and random.random() > 0.4:  # 60% chance to spawn correct item if available
-            item_text = random.choice(remaining_correct)
-            return item_text, self.target_category
-            
-        # 40% chance to spawn wrong item from other levels
-        # Get all possible wrong items from other levels
-        wrong_items = []
-        for category, items in ALL_QUANTITIES.items():
-            if category != self.target_category:  # Only from other levels
-                for item in items:
-                    # Only include items that aren't correct items in current level
-                    if item not in self.correct_items:
-                        wrong_items.append((item, category))
+        # Fallback to a correct item if no wrong items or if the random check failed but we must spawn something
+        if self.correct_items:
+            return random.choice(self.correct_items), self.target_category
         
-        if wrong_items:
-            return random.choice(wrong_items)
-            
-        # Fallback: if no wrong items found, return a correct one
-        if remaining_correct:
-            return random.choice(remaining_correct), self.target_category
-            
-        # Last resort: return any item
-        category = random.choice(list(ALL_QUANTITIES.keys()))
-        return random.choice(ALL_QUANTITIES[category]), category
+        # Should not happen if a level has expressions
+        return "BOŞ", "wrong"
     
     def prepare_spawn_events(self, min_items: int = 3, max_items: int = 6) -> None:
         """Prepare the spawn events for the current level.

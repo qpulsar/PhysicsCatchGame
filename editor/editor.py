@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import ttk
 import os
 import sys
 
@@ -10,6 +11,19 @@ from editor.ui.main_window import MainWindow
 
 if __name__ == "__main__":
     root = tk.Tk()
+
+    # sv-ttk temasını uygula (daha modern bir görünüm için)
+    try:
+        import sv_ttk
+        # Temayı "light" veya "dark" olarak ayarlayabilirsiniz
+        sv_ttk.set_theme("light")
+    except ImportError:
+        # sv-ttk yüklü değilse, standart bir temaya geri dön
+        print("sv-ttk kütüphanesi bulunamadı. Standart tema kullanılacak.")
+        style = ttk.Style(root)
+        if "clam" in style.theme_names():
+            style.theme_use("clam")
+
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'game_data.db')
     db_manager = DatabaseManager(db_path)
 

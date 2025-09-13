@@ -1,6 +1,6 @@
-import os
 import pygame
 from settings import *
+from ..components.player import Player
 
 class GameState:
     def __init__(self):
@@ -173,4 +173,4 @@ class GameState:
         if hasattr(self, 'sad_effect') and self.sad_effect:
             self.sad_effect.update()
             
-        return None  # No state change
+        return None  # No state change 

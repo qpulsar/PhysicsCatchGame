@@ -2,7 +2,7 @@
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from .models import Game, Level, Expression, GameSettings
+from .models import Game, Level, Expression, GameSettings, Sprite, SpriteDefinition
 from ..database.database import DatabaseManager
 
 
@@ -43,6 +43,29 @@ class GameService:
             if not row:
                 return None
             return Game.from_dict(dict(row))
+
+    def update_game(self, game_id: int, name: str, description: str) -> Optional[Game]:
+        """Update a game's name and description."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'UPDATE games SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                (name, description, game_id)
+            )
+            conn.commit()
+            if cursor.rowcount == 0:
+                return None
+        return self.get_game(game_id)
+
+    def delete_game(self, game_id: int) -> bool:
+        """Delete a game and all its related data."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            # Note: Ensure foreign keys are set up with ON DELETE CASCADE in the DB schema
+            # or delete related data manually here.
+            cursor.execute('DELETE FROM games WHERE id = ?', (game_id,))
+            conn.commit()
+            return cursor.rowcount > 0
     
     def get_settings(self, game_id: int = 1) -> GameSettings:
         """Get game settings."""
@@ -136,3 +159,91 @@ class ExpressionService:
             if not row:
                 return None
             return Expression.from_dict(dict(row))
+
+
+class SpriteService:
+    """Service for sprite-related operations."""
+
+    def __init__(self, db_manager: DatabaseManager):
+        self.db = db_manager
+
+    def add_sprite_sheet(self, game_id: int, name: str, path: str) -> Sprite:
+        """Adds a new sprite sheet to the database."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT INTO sprites (game_id, name, path) VALUES (?, ?, ?)',
+                (game_id, name, path)
+            )
+            conn.commit()
+            sprite_id = cursor.lastrowid
+            return self.get_sprite_sheet(sprite_id)
+
+    def get_sprite_sheets(self, game_id: int) -> List[Sprite]:
+        """Gets all sprite sheets for a game."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM sprites WHERE game_id = ? ORDER BY name', (game_id,))
+            return [Sprite.from_dict(dict(row)) for row in cursor.fetchall()]
+
+    def get_sprite_sheet(self, sprite_id: int) -> Optional[Sprite]:
+        """Gets a single sprite sheet by its ID."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM sprites WHERE id = ?', (sprite_id,))
+            row = cursor.fetchone()
+            return Sprite.from_dict(dict(row)) if row else None
+
+    def delete_sprite_sheet(self, sprite_id: int) -> bool:
+        """Deletes a sprite sheet and its definitions."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM sprites WHERE id = ?', (sprite_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def add_or_update_sprite_definition(self, sprite_id: int, expression_id: int, coords: Dict[str, int]) -> SpriteDefinition:
+        """Creates or updates a sprite definition for an expression."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO sprite_definitions (sprite_id, expression_id, x, y, width, height)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(expression_id) DO UPDATE SET
+                    sprite_id = excluded.sprite_id,
+                    x = excluded.x,
+                    y = excluded.y,
+                    width = excluded.width,
+                    height = excluded.height
+                ''',
+                (sprite_id, expression_id, coords['x'], coords['y'], coords['width'], coords['height'])
+            )
+            conn.commit()
+            # We need to fetch the ID of the inserted/updated row
+            cursor.execute('SELECT * FROM sprite_definitions WHERE expression_id = ?', (expression_id,))
+            row = cursor.fetchone()
+            return SpriteDefinition.from_dict(dict(row))
+            
+    def get_sprite_definition_for_expr(self, expression_id: int) -> Optional[SpriteDefinition]:
+        """Gets the sprite definition for a specific expression."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM sprite_definitions WHERE expression_id = ?', (expression_id,))
+            row = cursor.fetchone()
+            return SpriteDefinition.from_dict(dict(row)) if row else None
+            
+    def get_all_definitions_for_sheet(self, sprite_id: int) -> List[SpriteDefinition]:
+        """Gets all sprite definitions associated with a sprite sheet."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM sprite_definitions WHERE sprite_id = ?', (sprite_id,))
+            return [SpriteDefinition.from_dict(dict(row)) for row in cursor.fetchall()]
+
+    def remove_sprite_definition(self, expression_id: int) -> bool:
+        """Removes a sprite definition linked to an expression."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM sprite_definitions WHERE expression_id = ?', (expression_id,))
+            conn.commit()
+            return cursor.rowcount > 0

@@ -144,3 +144,49 @@ class GameSettings:
             settings=dict(data.get('settings', {})),
             updated_at=datetime.fromisoformat(data['updated_at'])
         )
+
+
+@dataclass
+class Sprite:
+    """Represents a sprite sheet file."""
+    id: int
+    game_id: int
+    name: str
+    path: str
+    created_at: datetime = field(default_factory=datetime.now)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Sprite':
+        return cls(
+            id=data['id'],
+            game_id=data['game_id'],
+            name=data['name'],
+            path=data['path'],
+            created_at=datetime.fromisoformat(data['created_at'])
+        )
+
+
+@dataclass
+class SpriteDefinition:
+    """Represents a single sprite's coordinates within a sprite sheet, linked to an expression."""
+    id: int
+    sprite_id: int
+    expression_id: int
+    x: int
+    y: int
+    width: int
+    height: int
+    created_at: datetime = field(default_factory=datetime.now)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SpriteDefinition':
+        return cls(
+            id=data['id'],
+            sprite_id=data['sprite_id'],
+            expression_id=data['expression_id'],
+            x=data['x'],
+            y=data['y'],
+            width=data['width'],
+            height=data['height'],
+            created_at=datetime.fromisoformat(data['created_at'])
+        )

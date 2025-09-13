@@ -7,7 +7,7 @@ from settings import ITEM_SIZE, ITEM_WIDTH, ITEM_HEIGHT, SCREEN_WIDTH, BLACK, RE
 
 # Try to import sprite_utils with error handling
 try:
-    from sprite_utils import load_buttons_from_sheet
+    from ..core.sprite_utils import load_buttons_from_sheet
     SPRITE_UTILS_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: Could not import sprite_utils: {e}")
