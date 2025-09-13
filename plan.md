@@ -34,7 +34,7 @@ Oyuncuları motive etmek için bir rozet sistemi eklenecek.
 
 ## Bölüm 2: Oyun Mekanikleri (`pygame`)
 
-### 2.1. Konu Seçim Ekranı
+### 2.1. Konu Seçim Ekranı (Tamamlandı)
 Oyuncu, oynamak istediği konuyu (editörde oluşturulmuş oyun) seçebilecek.
 
 -   **Menü:** Oyunun başlangıcına, veritabanında kayıtlı olan oyun konularını listeleyen bir menü ekranı eklenecek.
@@ -50,6 +50,9 @@ Metin tabanlı düşen nesneler, görsellerle değiştirilecek.
 -   **Görselleştirme:** `Item` sınıfı, artık sadece metin değil, veritabanından gelen sprite sheet ve koordinat bilgilerini kullanarak ilgili görseli ekranda gösterecek şekilde güncellenecek.
 
 ### 2.4. Rozet Kazanma Sistemi
+
+### 2.5. Oyun Bilgi Ekranı (Tamamlandı)
+Seçilen oyun için ad, açıklama/kuralların gösterildiği ve "Başla" düğmesi ile oyuna geçiş yapılan ekran eklendi.
 Oyun, oyuncunun başarılarını takip edecek ve rozetleri verecek.
 
 -   **Takip Mekanizması:** Oyuncunun ilerlemesini (yakalanan nesneler, tamamlanan seviyeler, yapılan hatalar) takip eden bir sistem geliştirilecek.

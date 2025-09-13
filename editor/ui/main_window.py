@@ -2,6 +2,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, Dict, Any
+import os
+from PIL import Image, ImageTk
 
 from ..core.models import Game
 from ..core.services import GameService, LevelService, ExpressionService, SpriteService
@@ -139,6 +141,8 @@ class DashboardFrame(ttk.Frame):
             self.notebook.tab(0, state="normal")
             for i in range(1, self.notebook.index("end")):
                 self.notebook.tab(i, state="normal")
+
+            self._refresh_media_gallery()
         else:
             self.title_label.config(text="Lütfen bir oyun seçin veya yeni bir tane ekleyin.")
             self.desc_label.config(text="")
@@ -164,9 +168,22 @@ class DashboardFrame(ttk.Frame):
         self.settings_text.grid(row=3, column=0, sticky="ew", pady=(0, 10))
         
         ttk.Label(frame, text="Medya Galerisi", style="Subheader.TLabel").grid(row=4, column=0, sticky="w")
-        gallery_frame = ttk.LabelFrame(frame, text=" (Yakında) ", padding=10)
-        gallery_frame.grid(row=5, column=0, sticky="nsew")
-        ttk.Label(gallery_frame, text="Oyun medyaları burada görünecek.").pack()
+        self.gallery_frame = ttk.Frame(frame)
+        self.gallery_frame.grid(row=5, column=0, sticky="nsew")
+        frame.rowconfigure(5, weight=1)
+        self.gallery_canvas = tk.Canvas(self.gallery_frame, height=260)
+        self.gallery_scrollbar = ttk.Scrollbar(self.gallery_frame, orient="vertical", command=self.gallery_canvas.yview)
+        self.gallery_inner = ttk.Frame(self.gallery_canvas)
+        self.gallery_inner.bind(
+            "<Configure>",
+            lambda e: self.gallery_canvas.configure(scrollregion=self.gallery_canvas.bbox("all"))
+        )
+        self.gallery_canvas.create_window((0,0), window=self.gallery_inner, anchor="nw")
+        self.gallery_canvas.configure(yscrollcommand=self.gallery_scrollbar.set)
+        self.gallery_canvas.grid(row=0, column=0, sticky="nsew")
+        self.gallery_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.gallery_frame.columnconfigure(0, weight=1)
+        self._gallery_images = []
         
         return frame
         
@@ -184,7 +201,7 @@ class DashboardFrame(ttk.Frame):
             self.tabs['levels'] = LevelsTab(self.notebook, self.game_service, self.level_service, self.expression_service)
             self.notebook.add(self.tabs['levels'].frame, text="Seviyeler")
 
-            self.tabs['sprites'] = SpritesTab(self.notebook, self.sprite_service, self.expression_service)
+            self.tabs['sprites'] = SpritesTab(self.notebook, self.sprite_service, self.expression_service, self.level_service, self.game_service)
             self.notebook.add(self.tabs['sprites'].frame, text="Sprite Yönetimi")
 
             self.tabs['settings'] = SettingsTab(self.notebook, self.game_service)
@@ -198,6 +215,92 @@ class DashboardFrame(ttk.Frame):
             for tab in self.tabs.values():
                 if hasattr(tab, 'refresh'):
                     tab.refresh()
+
+    def _refresh_media_gallery(self):
+        for child in self.gallery_inner.winfo_children():
+            child.destroy()
+        self._gallery_images.clear()
+        if not self.current_game:
+            return
+        game_id = self.current_game.id
+        settings = self.game_service.get_settings(game_id)
+        items = []
+        label_map = {
+            'start_background_path': 'Başlangıç Arkaplanı',
+            'thumbnail_path': 'Küçük Resim',
+            'music_path': 'Müzik (BGM)',
+            'end_win_background_path': 'Kazanma Arkaplanı',
+            'end_lose_background_path': 'Kaybetme Arkaplanı'
+        }
+        for key, label in label_map.items():
+            path = settings.get(key)
+            if path:
+                items.append({'type': 'setting', 'key': key, 'label': label, 'path': path})
+        for k, v in settings.settings.items():
+            if k.startswith('level_') and k.endswith('_background_path') and v:
+                items.append({'type': 'setting', 'key': k, 'label': k.replace('_', ' ').title(), 'path': v})
+        sheets = self.sprite_service.get_sprite_sheets(game_id)
+        for s in sheets:
+            items.append({'type': 'sprite', 'sprite_id': s.id, 'label': f"Sprite: {s.name}", 'path': s.path})
+        cols = 3
+        row = 0
+        col = 0
+        thumb_size = (160, 100)
+        for it in items:
+            frame = ttk.Frame(self.gallery_inner, padding=6)
+            frame.grid(row=row, column=col, sticky="nw")
+            path = it.get('path')
+            thumb_label = ttk.Label(frame)
+            thumb_label.pack()
+            img_ref = None
+            if path and os.path.isfile(path) and self._is_image(path):
+                try:
+                    img = Image.open(path)
+                    img.thumbnail(thumb_size, Image.LANCZOS)
+                    img_ref = ImageTk.PhotoImage(img)
+                    thumb_label.configure(image=img_ref)
+                    self._gallery_images.append(img_ref)
+                except Exception:
+                    thumb_label.configure(text="[Resim yüklenemedi]")
+            else:
+                name = os.path.basename(path) if path else "(yok)"
+                thumb_label.configure(text=f"📄 {name}")
+            ttk.Label(frame, text=it.get('label', '')).pack()
+            ttk.Button(frame, text="Sil", command=lambda item=it: self._delete_media_item(item)).pack(pady=(4,0))
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+
+    def _is_image(self, path: str) -> bool:
+        ext = os.path.splitext(path.lower())[1]
+        return ext in ('.png', '.jpg', '.jpeg', '.bmp', '.gif')
+
+    def _delete_media_item(self, item: Dict[str, Any]):
+        try:
+            if item.get('type') == 'sprite':
+                sprite_id = item.get('sprite_id')
+                self.sprite_service.delete_sprite_sheet(sprite_id)
+                if item.get('path') and os.path.isfile(item['path']):
+                    try:
+                        os.remove(item['path'])
+                    except Exception:
+                        pass
+            elif item.get('type') == 'setting':
+                key = item.get('key')
+                self.game_service.update_setting(self.current_game.id, key, '')
+                if item.get('path') and os.path.isfile(item['path']):
+                    try:
+                        os.remove(item['path'])
+                    except Exception:
+                        pass
+            else:
+                return
+            messagebox.showinfo("Başarılı", "Medya silindi.")
+        except Exception as e:
+            messagebox.showerror("Hata", f"Medya silinirken hata: {e}")
+        finally:
+            self._refresh_media_gallery()
 
 
 class MainWindow:

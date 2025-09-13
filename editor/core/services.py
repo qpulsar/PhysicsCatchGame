@@ -1,6 +1,9 @@
 """Core services for the game editor."""
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import os
+import shutil
+import unicodedata
 
 from .models import Game, Level, Expression, GameSettings, Sprite, SpriteDefinition
 from ..database.database import DatabaseManager
@@ -169,15 +172,46 @@ class SpriteService:
 
     def add_sprite_sheet(self, game_id: int, name: str, path: str) -> Sprite:
         """Adds a new sprite sheet to the database."""
+        # Copy into per-game assets directory first
+        dst_dir = os.path.join('assets', 'games', str(game_id), 'sprites')
+        os.makedirs(dst_dir, exist_ok=True)
+        basename = os.path.basename(path)
+        safe_name = self._sanitize_filename(basename)
+        dst_path = self._avoid_collision(dst_dir, safe_name)
+        if os.path.abspath(path) != os.path.abspath(dst_path):
+            shutil.copy2(path, dst_path)
+        rel_dst_path = dst_path.replace('\\', '/')
+
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 'INSERT INTO sprites (game_id, name, path) VALUES (?, ?, ?)',
-                (game_id, name, path)
+                (game_id, safe_name, rel_dst_path)
             )
             conn.commit()
             sprite_id = cursor.lastrowid
             return self.get_sprite_sheet(sprite_id)
+
+    def _sanitize_filename(self, name: str) -> str:
+        name = name.strip().lower()
+        name = unicodedata.normalize('NFKD', name)
+        name = name.encode('ascii', 'ignore').decode('ascii')
+        base, ext = os.path.splitext(name)
+        safe_base = ''.join(c if c.isalnum() or c in ('-', '_') else '_' for c in base)
+        safe_ext = ''.join(c if c.isalnum() else '' for c in ext)
+        ext = ('.' + safe_ext) if safe_ext else ''
+        if not safe_base:
+            safe_base = 'file'
+        return safe_base + ext
+
+    def _avoid_collision(self, directory: str, filename: str) -> str:
+        base, ext = os.path.splitext(filename)
+        candidate = os.path.join(directory, filename)
+        counter = 1
+        while os.path.exists(candidate):
+            candidate = os.path.join(directory, f"{base}_{counter}{ext}")
+            counter += 1
+        return candidate
 
     def get_sprite_sheets(self, game_id: int) -> List[Sprite]:
         """Gets all sprite sheets for a game."""

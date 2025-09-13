@@ -89,6 +89,31 @@ class Database:
             print(f"Database error: {e}")
             return []
 
+    def get_game_settings(self, game_id: int) -> dict:
+        """Get settings key/value for a specific game."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('SELECT key, value FROM game_settings WHERE game_id = ?', (game_id,))
+                return {row['key']: row['value'] for row in cursor.fetchall()}
+        except sqlite3.Error as e:
+            print(f"Database error: {e}")
+            return {}
+
+    def get_sprite_path(self, sprite_id: int) -> str | None:
+        """Get sprite sheet file path by sprite ID."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('SELECT path FROM sprites WHERE id = ?', (sprite_id,))
+                row = cursor.fetchone()
+                return row['path'] if row else None
+        except sqlite3.Error as e:
+            print(f"Database error: {e}")
+            return None
+
 class Carousel:
     """Manages the game selection carousel."""
     def __init__(self, games: list, font: pygame.font.Font):
@@ -112,21 +137,36 @@ class Carousel:
         self.card_rects = []
 
     def _create_cards(self) -> list[pygame.Surface]:
-        """Create surfaces (cards) for each game."""
+        """Create surfaces (cards) for each game with vibrant backgrounds."""
         cards = []
-        for game in self.games:
-            thumbnail_path = f"img/thumbnails/{game.id}.png"
+        for idx, game in enumerate(self.games):
+            # Prefer per-game assets thumbnail if present in settings
+            assets_thumb = None
+            try:
+                settings = Database().get_game_settings(getattr(game, 'id', 0))
+                assets_thumb = settings.get('thumbnail_path')
+            except Exception:
+                assets_thumb = None
+            thumbnail_path = assets_thumb if assets_thumb and os.path.exists(assets_thumb) else f"img/thumbnails/{game.id}.png"
             card_surface = pygame.Surface((CARD_WIDTH, CARD_HEIGHT), pygame.SRCALPHA)
+
+            # Canlı arka planı her zaman çiz
+            base_color = CARD_PALETTE[idx % len(CARD_PALETTE)] if 'CARD_PALETTE' in globals() else CARD_COLOR
+            pygame.draw.rect(card_surface, base_color, card_surface.get_rect(), border_radius=12)
+
+            # Görsel varsa içeri yerleştir, yoksa adını yaz
             try:
                 if os.path.exists(thumbnail_path):
                     img = pygame.image.load(thumbnail_path).convert_alpha()
                     img = pygame.transform.scale(img, (CARD_WIDTH - 20, CARD_HEIGHT - 20))
-                    card_surface.blit(img, (10, 10))
+                    img_rect = img.get_rect()
+                    img_rect.topleft = (10, 10)
+                    card_surface.blit(img, img_rect)
                 else:
                     raise FileNotFoundError
             except (pygame.error, FileNotFoundError):
-                card_surface.fill(CARD_COLOR)
-                draw_text(card_surface, game.name, 32, CARD_WIDTH / 2, CARD_HEIGHT / 2, TEXT_COLOR, wrap_width=CARD_WIDTH - 20)
+                draw_text(card_surface, game.name, 32, CARD_WIDTH / 2, CARD_HEIGHT / 2, WHITE, wrap_width=CARD_WIDTH - 20)
+
             cards.append(card_surface)
         return cards
 
@@ -160,7 +200,12 @@ class Carousel:
             self.card_rects.append((rect, i))
 
             if i == self.selected_index:
-                pygame.draw.rect(surface, CARD_SELECTED_COLOR, rect.inflate(20, 20), border_radius=15)
+                # Seçili karta parlak dış hat ve hafif gölge
+                outline_rect = rect.inflate(24, 24)
+                pygame.draw.rect(surface, CARD_SELECTED_COLOR, outline_rect, width=4, border_radius=18)
+                shadow = pygame.Surface((outline_rect.width, outline_rect.height), pygame.SRCALPHA)
+                pygame.draw.rect(shadow, (0,0,0,80), shadow.get_rect(), border_radius=18)
+                surface.blit(shadow, outline_rect.topleft)
 
             surface.blit(scaled_card, rect)
         
@@ -251,18 +296,51 @@ def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
     editor_button_rect = pygame.Rect(SCREEN_WIDTH - 220, SCREEN_HEIGHT - 70, 200, 50)
     is_hovered = editor_button_rect.collidepoint(mouse_pos)
     
-    button_color = MD_PURPLE_LIGHT if is_hovered else MD_PURPLE
+    button_color = PURPLE_LIGHT if is_hovered else PURPLE
     
     pygame.draw.rect(screen, button_color, editor_button_rect, border_radius=10)
     draw_text(screen, "Oyun Tasarla", 32, editor_button_rect.centerx, editor_button_rect.centery, TEXT_COLOR)
     return editor_button_rect
 
-def draw_playing_screen(screen, game_state, level_manager, ui_manager, effect_manager, level_bgs):
+def draw_game_info_screen(screen, game, mesh_bg, mouse_pos, bg_surface: pygame.Surface | None = None):
+    """Draws the selected game's information screen with a Start button."""
+    if bg_surface:
+        scaled = pygame.transform.scale(bg_surface, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        screen.blit(scaled, (0, 0))
+    else:
+        screen.fill(CAROUSEL_BG_COLOR)
+        mesh_bg.update()
+        mesh_bg.draw(screen)
+
+    title = getattr(game, 'name', 'Seçilen Oyun')
+    description = getattr(game, 'description', '') or "Bu oyunun kuralları: Doğru nesneleri yakalayarak puan kazan. Yanlışları kaçır. Seviye hedefini tamamla."
+
+    # Başlık
+    draw_text(screen, title, 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.18, TEXT_COLOR)
+
+    # Açıklama/kural metni (sarılmış)
+    content_width = int(SCREEN_WIDTH * 0.7)
+    draw_text(screen, description, 28, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.38, TEXT_COLOR, wrap_width=content_width)
+
+    # Başla butonu
+    btn_width, btn_height = 260, 64
+    start_button_rect = pygame.Rect((SCREEN_WIDTH - btn_width) // 2, int(SCREEN_HEIGHT * 0.72), btn_width, btn_height)
+    is_hovered = start_button_rect.collidepoint(mouse_pos)
+    button_color = LIGHT_GREEN if is_hovered else GREEN
+    pygame.draw.rect(screen, button_color, start_button_rect, border_radius=12)
+    draw_text(screen, "Başla", 36, start_button_rect.centerx, start_button_rect.centery, WHITE)
+
+    return start_button_rect
+
+def draw_playing_screen(screen, game_state, level_manager, ui_manager, effect_manager, level_bgs, bg_surface: pygame.Surface | None = None):
     """Draw the main game screen"""
     # Draw background
-    # This background logic should probably be in settings or a theme manager
-    bg_index = min(level_manager.level - 1, len(level_bgs) - 1)
-    screen.blit(level_bgs[bg_index], (0, 0))
+    # Prefer provided background surface, else fallback to defaults list
+    if bg_surface:
+        screen.blit(pygame.transform.scale(bg_surface, (SCREEN_WIDTH, SCREEN_HEIGHT)), (0, 0))
+    else:
+        bg_index = min(level_manager.level - 1, len(level_bgs) - 1)
+        screen.blit(level_bgs[bg_index], (0, 0))
     
     # Draw all sprites
     game_state.all_sprites.draw(screen)

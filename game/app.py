@@ -1,6 +1,7 @@
 import pygame
 import sys
 import subprocess
+import os
 from settings import *
 from .core.game_state import GameState
 from .managers.effect_manager import EffectManager
@@ -10,6 +11,7 @@ from .components.player import Player
 from .components.item import Item
 from .screens.game_screens import (
     draw_game_selection_screen, 
+    draw_game_info_screen,
     draw_playing_screen,
     MeshBackground,
     Database,
@@ -26,15 +28,20 @@ class Game:
         self.level_manager = LevelManager()
         self.ui_manager = UIManager()
         self.db = Database()
+        self.per_game_bg_surface = None
+        self.level_bg_surface = None
+        self.paddle_surface = None
 
         # Game Selection Screen
-        self.mesh_bg = MeshBackground(SCREEN_WIDTH, SCREEN_HEIGHT, particle_color=MD_LIGHT_GRAY, line_color=MD_TEAL)
+        self.mesh_bg = MeshBackground(SCREEN_WIDTH, SCREEN_HEIGHT, particle_color=LIGHT_GRAY, line_color=TEAL)
         self.games = self.db.get_games()
         self.carousel = Carousel(self.games, self.font) if self.games else None
         
         self.current_state = 'game_selection' if self.carousel else 'no_games'
         self.selected_game_id = None
+        self.selected_game = None
         self.editor_button_rect = None
+        self.start_button_rect = None
 
         # Backgrounds (should be managed by a theme or level manager)
         self.level_bgs = [pygame.transform.scale(pygame.image.load(os.path.join('img', 'backgrounds', f'{i}.jpg')), (SCREEN_WIDTH, SCREEN_HEIGHT)) for i in range(2,6)]
@@ -71,7 +78,18 @@ class Game:
             if self.current_state == 'game_selection' and self.carousel:
                 selected_id = self.carousel.handle_event(event)
                 if selected_id:
-                    self.start_game(selected_id)
+                    self.selected_game_id = selected_id
+                    self.selected_game = next((g for g in self.games if getattr(g, 'id', None) == selected_id), None)
+                    # Load per-game background if set
+                    self.per_game_bg_surface = None
+                    try:
+                        settings = self.db.get_game_settings(self.selected_game_id)
+                        bg_path = settings.get('start_background_path')
+                        if bg_path and os.path.exists(bg_path):
+                            self.per_game_bg_surface = pygame.image.load(bg_path).convert()
+                    except Exception as _:
+                        self.per_game_bg_surface = None
+                    self.current_state = 'game_info'
             
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -84,6 +102,8 @@ class Game:
                             self.carousel.target_x = SCREEN_WIDTH / 2
                     else: # level_up
                         self.current_state = 'playing'
+                elif self.current_state == 'game_info' and (event.key == pygame.K_RETURN or event.key == pygame.K_SPACE):
+                    self.start_game(self.selected_game_id)
         return True
 
     def handle_mouse_click(self, pos):
@@ -91,6 +111,9 @@ class Game:
             button_rect = pygame.Rect((SCREEN_WIDTH - 220)//2, SCREEN_HEIGHT//2 + 40, 220, 70)
             if button_rect.collidepoint(pos):
                 self.start_game(self.selected_game_id) # Needs a selected game
+        elif self.current_state == 'game_info':
+            if self.start_button_rect and self.start_button_rect.collidepoint(pos):
+                self.start_game(self.selected_game_id)
         elif self.current_state == 'playing':
             if self.game_state.help_button_rect.collidepoint(pos):
                 self.game_state.help_mode = not self.game_state.help_mode
@@ -104,7 +127,36 @@ class Game:
         self.selected_game_id = game_id
         self.game_state.reset()
         self.level_manager.setup_level(1, game_id)
-        self.game_state.player = Player()
+
+        # Load level-specific background if available
+        self.level_bg_surface = None
+        try:
+            settings_map = self.db.get_game_settings(game_id)
+            lvl_key = f"level_{self.level_manager.level}_background_path"
+            bg_path = settings_map.get(lvl_key)
+            if bg_path and os.path.exists(bg_path):
+                self.level_bg_surface = pygame.image.load(bg_path).convert()
+        except Exception:
+            self.level_bg_surface = None
+
+        # Load paddle from settings (sprite sheet region)
+        self.paddle_surface = None
+        try:
+            settings_map = settings_map if 'settings_map' in locals() else self.db.get_game_settings(game_id)
+            paddle_key = f"level_{self.level_manager.level}_paddle_sprite"
+            data = settings_map.get(paddle_key)
+            if data:
+                import json
+                info = json.loads(data)
+                sheet_path = self.db.get_sprite_path(int(info.get('sprite_id', 0)))
+                if sheet_path and os.path.exists(sheet_path):
+                    sheet_img = pygame.image.load(sheet_path).convert_alpha()
+                    rect = pygame.Rect(int(info['x']), int(info['y']), int(info['width']), int(info['height']))
+                    self.paddle_surface = sheet_img.subsurface(rect).copy()
+        except Exception:
+            self.paddle_surface = None
+
+        self.game_state.player = Player(self.paddle_surface)
         self.game_state.all_sprites.add(self.game_state.player)
         self.current_state = 'playing'
 
@@ -129,8 +181,10 @@ class Game:
         mouse_pos = pygame.mouse.get_pos()
         if self.current_state == 'game_selection' or self.current_state == 'no_games':
             self.editor_button_rect = draw_game_selection_screen(self.screen, self.carousel, self.mesh_bg, mouse_pos)
+        elif self.current_state == 'game_info':
+            self.start_button_rect = draw_game_info_screen(self.screen, self.selected_game, self.mesh_bg, mouse_pos, self.per_game_bg_surface)
         elif self.current_state == 'playing':
-            draw_playing_screen(self.screen, self.game_state, self.level_manager, self.ui_manager, self.effect_manager, self.level_bgs)
+            draw_playing_screen(self.screen, self.game_state, self.level_manager, self.ui_manager, self.effect_manager, self.level_bgs, self.level_bg_surface)
         elif self.current_state == 'level_up':
             self.ui_manager.draw_level_up(self.screen, self.level_manager.level, self.level_manager.target_category)
         elif self.current_state == 'game_over':

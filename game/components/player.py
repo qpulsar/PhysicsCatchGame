@@ -1,12 +1,16 @@
 import pygame
+from settings import *
 from settings import SCREEN_WIDTH, PLAYER_WIDTH, PLAYER_HEIGHT, PLAYER_SPEED, ORANGE
 from arduino import arduino_connected, ser
 
 class Player(pygame.sprite.Sprite):
-    def __init__(self):
+    def __init__(self, image_surface: pygame.Surface | None = None):
         super().__init__()
-        self.image = pygame.Surface([PLAYER_WIDTH, PLAYER_HEIGHT])
-        self.image.fill(ORANGE)
+        if image_surface is not None:
+            self.image = pygame.transform.smoothscale(image_surface, (PLAYER_WIDTH, PLAYER_HEIGHT))
+        else:
+            self.image = pygame.Surface([PLAYER_WIDTH, PLAYER_HEIGHT])
+            self.image.fill(ORANGE)
         self.rect = self.image.get_rect()
         self.rect.x = (SCREEN_WIDTH - PLAYER_WIDTH) // 2
         self.rect.y = SCREEN_HEIGHT - PLAYER_HEIGHT - 10
