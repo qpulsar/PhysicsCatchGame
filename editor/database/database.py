@@ -102,11 +102,9 @@ class DatabaseManager:
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS sprites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             path TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
 
         # Create sprite_definitions table to store individual sprite coordinates
@@ -122,6 +120,34 @@ class DatabaseManager:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (sprite_id) REFERENCES sprites (id) ON DELETE CASCADE,
             FOREIGN KEY (expression_id) REFERENCES expressions (id) ON DELETE CASCADE
+        )''')
+
+        # Create sprite_regions table to store user-defined regions on image assets
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sprite_regions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            width INTEGER NOT NULL,
+            height INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (image_path, name)
+        )''')
+        
+        # Create screens table to store screen layouts as JSON per game
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS screens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE,
+            UNIQUE (game_id, name)
         )''')
     
     def _initialize_default_data(self, cursor: sqlite3.Cursor) -> None:
@@ -285,3 +311,47 @@ class DatabaseManager:
                 VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             ''', (game_id, key, value))
             conn.commit()
+
+    # Screens operations
+    def upsert_screen(self, game_id: int, name: str, type_: str, data_json: str) -> int:
+        """Create or update a screen for a game.
+
+        Returns the screen id.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO screens (game_id, name, type, data_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(game_id, name) DO UPDATE SET
+                    type = excluded.type,
+                    data_json = excluded.data_json,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (game_id, name, type_, data_json))
+            conn.commit()
+            # fetch id
+            cursor.execute('SELECT id FROM screens WHERE game_id = ? AND name = ?', (game_id, name))
+            row = cursor.fetchone()
+            return int(row['id']) if row else 0
+
+    def get_screen(self, game_id: int, name: str) -> Optional[sqlite3.Row]:
+        """Get a screen row by game_id and name."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM screens WHERE game_id = ? AND name = ?', (game_id, name))
+            return cursor.fetchone()
+
+    def list_screens(self, game_id: int) -> List[sqlite3.Row]:
+        """List all screens for a given game."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM screens WHERE game_id = ? ORDER BY name', (game_id,))
+            return cursor.fetchall()
+
+    def delete_screen(self, game_id: int, name: str) -> bool:
+        """Delete a screen by game_id and name."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM screens WHERE game_id = ? AND name = ?', (game_id, name))
+            conn.commit()
+            return cursor.rowcount > 0

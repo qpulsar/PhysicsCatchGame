@@ -4,7 +4,6 @@ from tkinter import ttk, messagebox, filedialog
 import os
 import shutil
 import unicodedata
-from PIL import Image
 from typing import Dict, Any, Optional, Callable
 
 from ...core.services import GameService
@@ -56,28 +55,6 @@ class SettingsTab:
         self.default_max_items = ttk.Spinbox(container, from_=1, to=20, width=10)
         self.default_max_items.grid(row=3, column=1, sticky="w", padx=5, pady=5)
 
-        # Background image selection
-        ttk.Label(container, text="Başlangıç Arkaplan Görseli:").grid(row=4, column=0, sticky="e", padx=5, pady=5)
-        self.start_bg_path_var = tk.StringVar()
-        bg_frame = ttk.Frame(container)
-        bg_frame.grid(row=4, column=1, sticky="w", padx=5, pady=5)
-        self.start_bg_entry = ttk.Entry(bg_frame, textvariable=self.start_bg_path_var, width=32)
-        self.start_bg_entry.pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(bg_frame, text="Seç...", command=self._browse_start_bg).pack(side=tk.LEFT)
-
-        # Background scaling options
-        self.bg_scale_enable_var = tk.BooleanVar(value=False)
-        self.bg_scale_keep_ratio_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(container, text="Yeniden boyutlandır", variable=self.bg_scale_enable_var).grid(row=5, column=1, sticky="w", padx=5)
-        scale_row = ttk.Frame(container)
-        scale_row.grid(row=6, column=1, sticky="w", padx=5, pady=(0,5))
-        ttk.Label(scale_row, text="Genişlik:").pack(side=tk.LEFT)
-        self.bg_scale_w_var = tk.StringVar()
-        ttk.Entry(scale_row, textvariable=self.bg_scale_w_var, width=7).pack(side=tk.LEFT, padx=(2,8))
-        ttk.Label(scale_row, text="Yükseklik:").pack(side=tk.LEFT)
-        self.bg_scale_h_var = tk.StringVar()
-        ttk.Entry(scale_row, textvariable=self.bg_scale_h_var, width=7).pack(side=tk.LEFT, padx=(2,8))
-        ttk.Checkbutton(scale_row, text="Oranı koru", variable=self.bg_scale_keep_ratio_var).pack(side=tk.LEFT)
 
         # Thumbnail selection
         ttk.Label(container, text="Oyun Küçük Resmi (Thumbnail):").grid(row=7, column=0, sticky="e", padx=5, pady=5)
@@ -148,13 +125,13 @@ class SettingsTab:
             self.default_max_items.insert(0, settings.get('default_max_items', '5'))
 
             # Background path
-            self.start_bg_path_var.set(settings.get('start_background_path', ''))
+            #self.start_bg_path_var.set(settings.get('start_background_path', ''))
 
             # Background scaling options
-            self.bg_scale_enable_var.set(settings.get('bg_scale_enable', False))
-            self.bg_scale_w_var.set(settings.get('bg_scale_w', ''))
-            self.bg_scale_h_var.set(settings.get('bg_scale_h', ''))
-            self.bg_scale_keep_ratio_var.set(settings.get('bg_scale_keep_ratio', True))
+            #self.bg_scale_enable_var.set(settings.get('bg_scale_enable', False))
+            #self.bg_scale_w_var.set(settings.get('bg_scale_w', ''))
+            #self.bg_scale_h_var.set(settings.get('bg_scale_h', ''))
+            #self.bg_scale_keep_ratio_var.set(settings.get('bg_scale_keep_ratio', True))
 
             # Thumbnail and music
             self.thumb_path_var.set(settings.get('thumbnail_path', ''))
@@ -176,9 +153,6 @@ class SettingsTab:
                       self.default_item_speed, self.default_max_items]:
             widget.delete(0, tk.END)
             widget.insert(0, "")
-        self.start_bg_path_var.set("")
-        self.bg_scale_w_var.set("")
-        self.bg_scale_h_var.set("")
         self.thumb_path_var.set("")
         self.music_path_var.set("")
         self.game_description_text.delete("1.0", tk.END)
@@ -234,24 +208,7 @@ class SettingsTab:
             for key, value in settings.items():
                 self.game_service.update_setting(game_id, key, value)
 
-            # Handle background image copy (optional) with scaling
-            src_bg_path = self.start_bg_path_var.get().strip()
-            if src_bg_path:
-                try:
-                    dst_dir = os.path.join('assets', 'games', str(game_id), 'backgrounds')
-                    os.makedirs(dst_dir, exist_ok=True)
-                    dst_path = self._resize_and_copy_image(
-                        src_bg_path,
-                        dst_dir,
-                        self.bg_scale_enable_var.get(),
-                        self.bg_scale_w_var.get().strip(),
-                        self.bg_scale_h_var.get().strip(),
-                        self.bg_scale_keep_ratio_var.get()
-                    )
-                    rel_dst_path = dst_path.replace('\\', '/')
-                    self.game_service.update_setting(game_id, 'start_background_path', rel_dst_path)
-                except Exception as copy_err:
-                    messagebox.showwarning("Uyarı", f"Arkaplan kopyalanamadı: {copy_err}")
+
 
             # Handle thumbnail copy (optional)
             src_thumb = self.thumb_path_var.get().strip()
@@ -259,14 +216,15 @@ class SettingsTab:
                 try:
                     if not os.path.isfile(src_thumb):
                         raise FileNotFoundError("Seçilen küçük resim dosyası bulunamadı.")
-                    dst_dir = os.path.join('assets', 'games', str(game_id), 'thumbnails')
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+                    dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'thumbnails')
                     os.makedirs(dst_dir, exist_ok=True)
                     basename = os.path.basename(src_thumb)
                     safe_name = self._sanitize_filename(basename)
                     dst_path = self._avoid_collision(dst_dir, safe_name)
                     if os.path.abspath(src_thumb) != os.path.abspath(dst_path):
                         shutil.copy2(src_thumb, dst_path)
-                    rel_dst_path = dst_path.replace('\\', '/')
+                    rel_dst_path = os.path.relpath(dst_path, project_root).replace('\\', '/')
                     self.game_service.update_setting(game_id, 'thumbnail_path', rel_dst_path)
                 except Exception as copy_err:
                     messagebox.showwarning("Uyarı", f"Küçük resim kopyalanamadı: {copy_err}")
@@ -277,14 +235,15 @@ class SettingsTab:
                 try:
                     if not os.path.isfile(src_music):
                         raise FileNotFoundError("Seçilen müzik dosyası bulunamadı.")
-                    dst_dir = os.path.join('assets', 'games', str(game_id), 'audio')
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+                    dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'audio')
                     os.makedirs(dst_dir, exist_ok=True)
                     basename = os.path.basename(src_music)
                     safe_name = self._sanitize_filename(basename)
                     dst_path = self._avoid_collision(dst_dir, safe_name)
                     if os.path.abspath(src_music) != os.path.abspath(dst_path):
                         shutil.copy2(src_music, dst_path)
-                    rel_dst_path = dst_path.replace('\\', '/')
+                    rel_dst_path = os.path.relpath(dst_path, project_root).replace('\\', '/')
                     self.game_service.update_setting(game_id, 'music_path', rel_dst_path)
                 except Exception as copy_err:
                     messagebox.showwarning("Uyarı", f"Müzik kopyalanamadı: {copy_err}")
@@ -299,21 +258,6 @@ class SettingsTab:
             
         except Exception as e:
             messagebox.showerror("Hata", f"Ayarlar kaydedilirken bir hata oluştu: {str(e)}")
-
-    def _browse_start_bg(self) -> None:
-        """Open a file dialog to select a background image."""
-        file_path = filedialog.askopenfilename(
-            title="Arkaplan Görseli Seç",
-            filetypes=[
-                ("Görüntü Dosyaları", "*.png;*.jpg;*.jpeg;*.bmp"),
-                ("PNG", "*.png"),
-                ("JPEG", "*.jpg;*.jpeg"),
-                ("Bitmap", "*.bmp"),
-                ("Tümü", "*.*")
-            ]
-        )
-        if file_path:
-            self.start_bg_path_var.set(file_path)
 
     def _browse_thumbnail(self) -> None:
         """Open a file dialog to select a thumbnail image."""
@@ -371,45 +315,4 @@ class SettingsTab:
             counter += 1
         return candidate
 
-    def _resize_and_copy_image(self, src_path: str, dst_dir: str, enable_scale: bool, w_str: str, h_str: str, keep_ratio: bool) -> str:
-        if not os.path.isfile(src_path):
-            raise FileNotFoundError("Kaynak dosya bulunamadı")
-        basename = os.path.basename(src_path)
-        safe_name = self._sanitize_filename(basename)
-        dst_path = self._avoid_collision(dst_dir, safe_name)
-        if not enable_scale:
-            if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                shutil.copy2(src_path, dst_path)
-            return dst_path
-        # Determine size
-        img = Image.open(src_path)
-        orig_w, orig_h = img.size
-        new_w = int(w_str) if w_str.isdigit() and int(w_str) > 0 else None
-        new_h = int(h_str) if h_str.isdigit() and int(h_str) > 0 else None
-        if keep_ratio:
-            if new_w and not new_h:
-                new_h = int(round(orig_h * (new_w / orig_w)))
-            elif new_h and not new_w:
-                new_w = int(round(orig_w * (new_h / orig_h)))
-            elif new_w and new_h:
-                # Prefer width to compute height
-                new_h = int(round(orig_h * (new_w / orig_w)))
-            else:
-                # No size provided, fallback to original copy
-                if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                    shutil.copy2(src_path, dst_path)
-                return dst_path
-        else:
-            # Not keeping ratio: require at least one dim
-            if not new_w and not new_h:
-                if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                    shutil.copy2(src_path, dst_path)
-                return dst_path
-            if not new_w:
-                new_w = orig_w
-            if not new_h:
-                new_h = orig_h
-        resized = img.resize((new_w, new_h), Image.LANCZOS)
-        # Save with same extension
-        resized.save(dst_path)
-        return dst_path
+

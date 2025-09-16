@@ -5,7 +5,7 @@ import os
 import shutil
 import unicodedata
 
-from .models import Game, Level, Expression, GameSettings, Sprite, SpriteDefinition
+from .models import Game, Level, Expression, GameSettings, Sprite, SpriteDefinition, Screen
 from ..database.database import DatabaseManager
 
 
@@ -69,6 +69,55 @@ class GameService:
             cursor.execute('DELETE FROM games WHERE id = ?', (game_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    def get_settings(self, game_id: int = 1) -> GameSettings:
+        """Get game settings for the given game_id."""
+        settings: Dict[str, str] = {}
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT key, value FROM game_settings 
+                WHERE game_id = ?
+            ''', (game_id,))
+            for key, value in cursor.fetchall():
+                settings[key] = value
+        return GameSettings(game_id=game_id, settings=settings)
+
+    def update_setting(self, game_id: int, key: str, value: str) -> None:
+        """Update a single game setting key/value."""
+        self.db.set_setting(game_id, key, value)
+
+
+class ScreenService:
+    """Service for editor-designed screens stored in the database.
+
+    Provides CRUD helpers around `screens` table to manage JSON-based screen layouts
+    such as the Opening screen. Use this from editor UI and runtime loaders.
+    """
+
+    def __init__(self, db_manager: DatabaseManager):
+        """Initialize with a database manager."""
+        self.db = db_manager
+
+    def upsert_screen(self, game_id: int, name: str, type_: str, data_json: str) -> Screen:
+        """Insert or update a screen configuration and return the Screen model."""
+        sid = self.db.upsert_screen(game_id, name, type_, data_json)
+        row = self.db.get_screen(game_id, name)
+        return Screen.from_dict(dict(row)) if row else Screen(id=sid, game_id=game_id, name=name, type=type_, data_json=data_json)
+
+    def get_screen(self, game_id: int, name: str) -> Optional[Screen]:
+        """Fetch a screen by game and name."""
+        row = self.db.get_screen(game_id, name)
+        return Screen.from_dict(dict(row)) if row else None
+
+    def list_screens(self, game_id: int) -> List[Screen]:
+        """List all screens for a game."""
+        rows = self.db.list_screens(game_id)
+        return [Screen.from_dict(dict(r)) for r in rows]
+
+    def delete_screen(self, game_id: int, name: str) -> bool:
+        """Delete a screen by name for a game."""
+        return self.db.delete_screen(game_id, name)
     
     def get_settings(self, game_id: int = 1) -> GameSettings:
         """Get game settings."""
@@ -170,10 +219,13 @@ class SpriteService:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
 
-    def add_sprite_sheet(self, game_id: int, name: str, path: str) -> Sprite:
-        """Adds a new sprite sheet to the database."""
-        # Copy into per-game assets directory first
-        dst_dir = os.path.join('assets', 'games', str(game_id), 'sprites')
+    def add_sprite_sheet(self, name: str, path: str) -> Sprite:
+        """Add a new sprite sheet to the GLOBAL pool.
+
+        Copies the file under `assets/sprites/` and stores an entry in `sprites` table.
+        """
+        # Copy into global assets directory
+        dst_dir = os.path.join('assets', 'sprites')
         os.makedirs(dst_dir, exist_ok=True)
         basename = os.path.basename(path)
         safe_name = self._sanitize_filename(basename)
@@ -185,8 +237,8 @@ class SpriteService:
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO sprites (game_id, name, path) VALUES (?, ?, ?)',
-                (game_id, safe_name, rel_dst_path)
+                'INSERT INTO sprites (name, path) VALUES (?, ?)',
+                (safe_name, rel_dst_path)
             )
             conn.commit()
             sprite_id = cursor.lastrowid
@@ -213,11 +265,11 @@ class SpriteService:
             counter += 1
         return candidate
 
-    def get_sprite_sheets(self, game_id: int) -> List[Sprite]:
-        """Gets all sprite sheets for a game."""
+    def get_sprite_sheets(self) -> List[Sprite]:
+        """Get all sprite sheets from the GLOBAL pool."""
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM sprites WHERE game_id = ? ORDER BY name', (game_id,))
+            cursor.execute('SELECT * FROM sprites ORDER BY name')
             return [Sprite.from_dict(dict(row)) for row in cursor.fetchall()]
 
     def get_sprite_sheet(self, sprite_id: int) -> Optional[Sprite]:
@@ -281,3 +333,89 @@ class SpriteService:
             cursor.execute('DELETE FROM sprite_definitions WHERE expression_id = ?', (expression_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    # -------- Sprite Regions (DB-backed) --------
+    def list_sprite_regions(self) -> List[Dict[str, Any]]:
+        """List all saved sprite regions.
+
+        Returns a list of dicts: {id, image_path, name, x, y, width, height}.
+        """
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, image_path, name, x, y, width, height
+                FROM sprite_regions
+                ORDER BY image_path, name
+            ''')
+            return [dict(row) for row in cursor.fetchall()]
+
+    def upsert_sprite_region(self, image_path: str, name: str, coords: Dict[str, int]) -> Dict[str, Any]:
+        """Create or update a sprite region by unique (image_path, name)."""
+        # normalize path to a project-root-relative forward-slash path
+        image_path = self._normalize_image_path(image_path)
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO sprite_regions (image_path, name, x, y, width, height)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(image_path, name) DO UPDATE SET
+                    x = excluded.x,
+                    y = excluded.y,
+                    width = excluded.width,
+                    height = excluded.height
+            ''', (image_path, name, int(coords['x']), int(coords['y']), int(coords['width']), int(coords['height'])))
+            conn.commit()
+            cursor.execute('''
+                SELECT id, image_path, name, x, y, width, height
+                FROM sprite_regions WHERE image_path = ? AND name = ?
+            ''', (image_path, name))
+            row = cursor.fetchone()
+            return dict(row) if row else {}
+
+    def rename_sprite_region(self, image_path: str, old_name: str, new_name: str) -> bool:
+        """Rename a sprite region. Returns True if a row was updated."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE sprite_regions
+                SET name = ?
+                WHERE image_path = ? AND name = ?
+            ''', (new_name, image_path, old_name))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_sprite_region(self, image_path: str, name: str) -> bool:
+        """Delete a sprite region by key."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM sprite_regions WHERE image_path = ? AND name = ?', (image_path, name))
+            conn.commit()
+            return cursor.rowcount > 0
+
+
+
+
+    # ---- Helpers ----
+    def _normalize_image_path(self, image_path: str) -> str:
+        """Return a normalized, project-root-relative path with forward slashes.
+
+        - Converts absolute paths under project root to relative
+        - Ensures consistent forward slashes
+        - Leaves other paths as-is
+        """
+        if not image_path:
+            return image_path
+        p = image_path.replace('\\', '/').strip()
+        # If absolute and under project root, make relative
+        try:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+            if os.path.isabs(p):
+                # normalize for os
+                pr = project_root
+                if p.startswith(pr):
+                    rel = os.path.relpath(p, pr).replace('\\', '/')
+                    return rel
+        except Exception:
+            pass
+        # already relative
+        return p

@@ -116,13 +116,12 @@ class GameState:
         self.confetti_particles = [p for p in self.confetti_particles 
                                  if p.timer > 0]
         
-        # Clean up sad effect if expired
         if hasattr(self, 'sad_effect') and self.sad_effect and self.sad_effect.life <= 0:
             self.sad_effect = None
                                   
     def update(self, level_manager):
         """Update game state
-        
+
         Args:
             level_manager: The level manager instance to use for level-related operations
             
@@ -159,7 +158,8 @@ class GameState:
                 return 'game_over'
             else:
                 level_manager.level += 1
-                level_manager.setup_level(level_manager.level)
+                # Pass active game_id as required by LevelManager.setup_level(level, game_id)
+                level_manager.setup_level(level_manager.level, getattr(level_manager, 'game_id', None))
                 return 'level_up'
                 
         # Update effects

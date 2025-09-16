@@ -190,3 +190,32 @@ class SpriteDefinition:
             height=data['height'],
             created_at=datetime.fromisoformat(data['created_at'])
         )
+
+
+@dataclass
+class Screen:
+    """Represents a designed screen (e.g., opening) stored as JSON in DB.
+
+    The JSON payload contains layout and widget definitions. This model mirrors the
+    `screens` table structure for editor operations.
+    """
+    id: int
+    game_id: int
+    name: str
+    type: str
+    data_json: str
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Screen':
+        """Create a Screen instance from a dictionary."""
+        return cls(
+            id=data['id'],
+            game_id=data['game_id'],
+            name=data['name'],
+            type=data['type'],
+            data_json=data['data_json'],
+            created_at=datetime.fromisoformat(data.get('created_at')) if data.get('created_at') else datetime.now(),
+            updated_at=datetime.fromisoformat(data.get('updated_at')) if data.get('updated_at') else datetime.now()
+        )

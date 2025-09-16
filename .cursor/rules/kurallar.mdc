@@ -9,3 +9,6 @@ alwaysApply: true
 4- ./editor/editor.py tasarım ekranını başlatır.
 5- Mümkün olduğunca responsive tasarım yap.
 6- plan.md dosyasına uygun şekilde ilerle. Yapılan görevi işaretle.
+7- assets klasöründe dosya eklemek için MediaTab sınıfını kullan.
+
+

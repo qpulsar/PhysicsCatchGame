@@ -1,4 +1,10 @@
-"""Tab for managing sprite sheets and their definitions."""
+"""Tab for browsing image assets and selecting visuals from assets/.
+
+This refactor simplifies the original Sprite Sheets manager. It now:
+- Scans assets/ and assets/games/<game_id>/ recursively for image files
+- Lists images on the left and previews the selection on the right
+- Removes overlapping responsibilities with ScreenDesigner (no expressions, levels, end screens here)
+"""
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -64,22 +70,18 @@ class Cropper(tk.Toplevel):
 
 
 class SpritesTab:
-    """The main UI for sprite management."""
+    """Simplified assets browser for selecting images from assets/."""
     def __init__(self, parent, sprite_service: SpriteService, expression_service: ExpressionService, level_service: LevelService, game_service: GameService):
         self.parent = parent
         self.sprite_service = sprite_service
         self.expression_service = expression_service # To get expressions
         self.level_service = level_service
         self.game_service = game_service
-        self.current_game_id = None
-        self.selected_sprite_sheet: Optional[Sprite] = None
+        self.selected_sprite_sheet: Optional[Sprite] = None  # legacy, unused
         self.tk_image = None
-        self.sprite_definitions: List[SpriteDefinition] = []
-        self.expressions_index: Dict[int, str] = {}
-        self.expr_label_to_id: Dict[str, int] = {}
-        self.last_crop_coords: Optional[Dict[str, int]] = None
-        self.levels_cache: List = []
-        self.sheets_cache: List[Sprite] = []
+        # Simplified state
+        self.asset_images: List[str] = []  # relative paths from project root
+        self._index_to_path: Dict[str, str] = {}  # tree iid -> rel path
 
         self.frame = ttk.Frame(parent)
         self.frame.rowconfigure(0, weight=1)
@@ -87,38 +89,72 @@ class SpritesTab:
 
         self.paned_window = ttk.PanedWindow(self.frame, orient=tk.HORIZONTAL)
         self.paned_window.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        # deferred refresh state
+        self._defer_attempts = 0
+        self._defer_max = 25  # ~5sn (200ms aralıklarla)
+        self._defer_scheduled = False
 
-        # Left Pane: Sprite Sheet List
+        # Left Pane: Assets Image List
         left_pane = self._create_left_pane()
         self.paned_window.add(left_pane, weight=1)
 
-        # Right Pane: Sprite Sheet Viewer and Definitions
+        # Right Pane: Preview
         right_pane = self._create_right_pane()
         self.paned_window.add(right_pane, weight=3)
+
+        # Populate regions immediately (even before a game is selected)
+        try:
+            self._refresh_regions_list()
+        except Exception:
+            pass
+
+        # Auto-refresh when the tab becomes visible
+        self.frame.bind('<Map>', lambda event: self.refresh())
 
     def _create_left_pane(self) -> ttk.Frame:
         pane = ttk.Frame(self.paned_window)
         pane.rowconfigure(0, weight=1)
         pane.columnconfigure(0, weight=1)
 
-        # Sprite Sheet List
-        list_frame = ttk.LabelFrame(pane, text="Sprite Sheets", padding=5)
+        # Assets Image List
+        list_frame = ttk.LabelFrame(pane, text="Görseller (assets)", padding=5)
         list_frame.grid(row=0, column=0, sticky="nsew", pady=5)
         list_frame.rowconfigure(0, weight=1)
         list_frame.columnconfigure(0, weight=1)
 
-        self.sheets_tree = ttk.Treeview(list_frame, columns=("name",), show="headings", selectmode="browse")
-        self.sheets_tree.heading("name", text="Ad")
+        self.sheets_tree = ttk.Treeview(list_frame, columns=("path",), show="headings", selectmode="browse")
+        self.sheets_tree.heading("path", text="Görsel (göreli yol)")
         self.sheets_tree.grid(row=0, column=0, sticky="nsew")
         self.sheets_tree.bind("<<TreeviewSelect>>", self._on_sheet_select)
 
-        # Buttons
+        # Info row (management hint + refresh)
         button_frame = ttk.Frame(pane)
         button_frame.grid(row=1, column=0, sticky="ew", pady=(5,0))
-        ttk.Button(button_frame, text="Assets'e Ekle", command=self._add_sheet).pack(side=tk.LEFT, padx=2)
-        self.delete_sheet_button = ttk.Button(button_frame, text="Sil", command=self._delete_sheet, state="disabled")
-        self.delete_sheet_button.pack(side=tk.LEFT, padx=2)
+        ttk.Label(button_frame, text="Bu sekme sadece seçim içindir. Yönetim ScreenDesigner/Level ekranlarında yapılır.").pack(side=tk.LEFT)
+        # Debug & refresh controls
+        ttk.Button(button_frame, text="Yenile", command=self.refresh).pack(side=tk.RIGHT)
+        ttk.Button(button_frame, text="Debug: Sprite Kontrol", command=self._debug_regions_check).pack(side=tk.RIGHT, padx=(0,6))
         
+        # Regions management
+        regions_frame = ttk.LabelFrame(pane, text="Sprite Bölgeleri", padding=5)
+        regions_frame.grid(row=2, column=0, sticky="nsew", pady=5)
+        regions_frame.rowconfigure(0, weight=1)
+        regions_frame.columnconfigure(0, weight=1)
+        self.regions_tree = ttk.Treeview(regions_frame, columns=("name","image","coords"), show="headings", selectmode="browse")
+        self.regions_tree.heading("name", text="Ad")
+        self.regions_tree.heading("image", text="Görsel")
+        self.regions_tree.heading("coords", text="(x,y,w,h)")
+        self.regions_tree.column("name", width=160)
+        self.regions_tree.column("image", width=260)
+        self.regions_tree.column("coords", width=140)
+        self.regions_tree.grid(row=0, column=0, sticky="nsew")
+        # Bölge seçimi değişince küçük önizlemeyi güncelle
+        self.regions_tree.bind("<<TreeviewSelect>>", lambda e: self._update_region_preview())
+        btn_row = ttk.Frame(regions_frame)
+        btn_row.grid(row=1, column=0, sticky="ew", pady=(6,0))
+        ttk.Button(btn_row, text="Yeniden Adlandır", command=self._rename_region).pack(side=tk.LEFT)
+        ttk.Button(btn_row, text="Sil", command=self._delete_region).pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_row, text="Yeniden Kırp", command=self._recrop_region).pack(side=tk.LEFT)
         return pane
 
     def _create_right_pane(self) -> ttk.Frame:
@@ -126,300 +162,122 @@ class SpritesTab:
         pane.rowconfigure(0, weight=1)
         pane.columnconfigure(0, weight=1)
 
-        # Viewer Frame
+        # Viewer Frame (küçültülmüş ana önizleme)
         viewer_frame = ttk.LabelFrame(pane, text="Önizleme", padding=5)
         viewer_frame.grid(row=0, column=0, sticky="nsew", pady=5)
-        self.image_canvas = tk.Canvas(viewer_frame, background="white")
-        self.image_canvas.pack(fill="both", expand=True)
+        # Ana görsel için daha küçük bir canvas ve sabit maksimum boyut
+        self._main_preview_max = (500, 300)
+        self.image_canvas = tk.Canvas(viewer_frame, width=self._main_preview_max[0], height=self._main_preview_max[1], background="white")
+        self.image_canvas.pack(fill="x", expand=False)
         self.image_canvas.bind("<Double-1>", self._open_cropper)
 
-        # Selected area label
+        # Seçili görsel yol bilgisi
         sel_frame = ttk.Frame(viewer_frame)
         sel_frame.pack(fill="x", pady=(5,0))
-        ttk.Label(sel_frame, text="Seçilen Alan:").pack(side=tk.LEFT)
-        self.selected_area_var = tk.StringVar(value="(yok)")
-        ttk.Label(sel_frame, textvariable=self.selected_area_var).pack(side=tk.LEFT, padx=5)
+        ttk.Label(sel_frame, text="Seçilen Görsel:").pack(side=tk.LEFT)
+        self.selected_image_var = tk.StringVar(value="(yok)")
+        ttk.Label(sel_frame, textvariable=self.selected_image_var).pack(side=tk.LEFT, padx=5)
 
-        # Definitions Frame
-        defs_frame = ttk.LabelFrame(pane, text="Sprite Tanımları", padding=5)
-        defs_frame.grid(row=1, column=0, sticky="ew", pady=5)
-        defs_frame.columnconfigure(0, weight=1)
-
-        # Treeview for definitions
-        self.defs_tree = ttk.Treeview(defs_frame, columns=("expr", "coords"), show="headings")
-        self.defs_tree.heading("expr", text="İlişkili İfade")
-        self.defs_tree.heading("coords", text="Koordinatlar (x, y, w, h)")
-        self.defs_tree.grid(row=0, column=0, sticky="ew")
-
-        # Assign Expression UI
-        assign_frame = ttk.Frame(defs_frame)
-        assign_frame.grid(row=1, column=0, sticky="ew", pady=5)
-        ttk.Label(assign_frame, text="İfade Ata:").pack(side=tk.LEFT)
-        self.expr_var = tk.StringVar()
-        self.expr_combo = ttk.Combobox(assign_frame, textvariable=self.expr_var, state="readonly")
-        self.expr_combo.pack(side=tk.LEFT, padx=5, expand=True, fill="x")
-        ttk.Button(assign_frame, text="Bölge Seç", command=self._open_cropper).pack(side=tk.LEFT, padx=5)
-        self.assign_button = ttk.Button(assign_frame, text="Ata", command=self._assign_expression, state="disabled")
-        self.assign_button.pack(side=tk.LEFT)
-
-        # Level Assets Frame
-        level_assets = ttk.LabelFrame(pane, text="Seviye Varlıkları (Arkaplan ve Paddle)", padding=5)
-        level_assets.grid(row=2, column=0, sticky="ew", pady=5)
-        level_assets.columnconfigure(1, weight=1)
-
-        ttk.Label(level_assets, text="Seviye:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-        self.level_sel_var = tk.StringVar()
-        self.level_sel = ttk.Combobox(level_assets, textvariable=self.level_sel_var, state="readonly")
-        self.level_sel.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-        self.level_sel.bind("<<ComboboxSelected>>", lambda e: self._load_level_assets())
-
-        # Level background selector
-        ttk.Label(level_assets, text="Seviye Arkaplanı:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
-        self.level_bg_var = tk.StringVar()
-        lvl_bg_frame = ttk.Frame(level_assets)
-        lvl_bg_frame.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-        ttk.Entry(lvl_bg_frame, textvariable=self.level_bg_var, width=32).pack(side=tk.LEFT, padx=(0,5))
-        ttk.Button(lvl_bg_frame, text="Seç...", command=self._browse_level_bg).pack(side=tk.LEFT)
-        # Level background scaling options
-        self.level_scale_enable_var = tk.BooleanVar(value=False)
-        self.level_scale_keep_ratio_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(level_assets, text="Yeniden boyutlandır", variable=self.level_scale_enable_var).grid(row=1, column=2, sticky="w")
-        lvl_scale_row = ttk.Frame(level_assets)
-        lvl_scale_row.grid(row=1, column=3, sticky="w")
-        ttk.Label(lvl_scale_row, text="W:").pack(side=tk.LEFT)
-        self.level_scale_w_var = tk.StringVar()
-        ttk.Entry(lvl_scale_row, textvariable=self.level_scale_w_var, width=6).pack(side=tk.LEFT)
-        ttk.Label(lvl_scale_row, text="H:").pack(side=tk.LEFT)
-        self.level_scale_h_var = tk.StringVar()
-        ttk.Entry(lvl_scale_row, textvariable=self.level_scale_h_var, width=6).pack(side=tk.LEFT)
-        ttk.Checkbutton(lvl_scale_row, text="Oran", variable=self.level_scale_keep_ratio_var).pack(side=tk.LEFT)
-
-        # Paddle selection: sheet + region
-        ttk.Label(level_assets, text="Paddle Sprite Sheet:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
-        self.paddle_sheet_var = tk.StringVar()
-        self.paddle_sheet_combo = ttk.Combobox(level_assets, textvariable=self.paddle_sheet_var, state="readonly")
-        self.paddle_sheet_combo.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
-
-        ttk.Label(level_assets, text="Paddle Bölge:").grid(row=3, column=0, sticky="e", padx=5, pady=5)
-        paddle_area_frame = ttk.Frame(level_assets)
-        paddle_area_frame.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
-        self.paddle_area_var = tk.StringVar(value="(yok)")
-        ttk.Label(paddle_area_frame, textvariable=self.paddle_area_var).pack(side=tk.LEFT)
-        ttk.Button(paddle_area_frame, text="Bölge Seç", command=self._select_paddle_region).pack(side=tk.LEFT, padx=5)
-
-        ttk.Button(level_assets, text="Seviye Varlıklarını Kaydet", command=self._save_level_assets).grid(row=4, column=0, columnspan=2, pady=(8,0))
-
-        # End Screens Frame
-        end_frame = ttk.LabelFrame(pane, text="Bitiş Ekranları (Kazanma / Kaybetme)", padding=5)
-        end_frame.grid(row=3, column=0, sticky="ew", pady=5)
-        end_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(end_frame, text="Kazanma Arkaplanı:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
-        self.win_bg_var = tk.StringVar()
-        win_bg_frame = ttk.Frame(end_frame)
-        win_bg_frame.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-        ttk.Entry(win_bg_frame, textvariable=self.win_bg_var, width=32).pack(side=tk.LEFT, padx=(0,5))
-        ttk.Button(win_bg_frame, text="Seç...", command=self._browse_win_bg).pack(side=tk.LEFT)
-        # Win scaling
-        self.win_scale_enable_var = tk.BooleanVar(value=False)
-        self.win_scale_keep_ratio_var = tk.BooleanVar(value=True)
-        win_scale_row = ttk.Frame(end_frame)
-        win_scale_row.grid(row=0, column=2, sticky="w")
-        ttk.Checkbutton(win_scale_row, text="Boyutlandır", variable=self.win_scale_enable_var).pack(side=tk.LEFT)
-        ttk.Label(win_scale_row, text="W:").pack(side=tk.LEFT)
-        self.win_scale_w_var = tk.StringVar()
-        ttk.Entry(win_scale_row, textvariable=self.win_scale_w_var, width=6).pack(side=tk.LEFT)
-        ttk.Label(win_scale_row, text="H:").pack(side=tk.LEFT)
-        self.win_scale_h_var = tk.StringVar()
-        ttk.Entry(win_scale_row, textvariable=self.win_scale_h_var, width=6).pack(side=tk.LEFT)
-        ttk.Checkbutton(win_scale_row, text="Oran", variable=self.win_scale_keep_ratio_var).pack(side=tk.LEFT)
-
-        ttk.Label(end_frame, text="Kaybetme Arkaplanı:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
-        self.lose_bg_var = tk.StringVar()
-        lose_bg_frame = ttk.Frame(end_frame)
-        lose_bg_frame.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-        ttk.Entry(lose_bg_frame, textvariable=self.lose_bg_var, width=32).pack(side=tk.LEFT, padx=(0,5))
-        ttk.Button(lose_bg_frame, text="Seç...", command=self._browse_lose_bg).pack(side=tk.LEFT)
-        # Lose scaling
-        self.lose_scale_enable_var = tk.BooleanVar(value=False)
-        self.lose_scale_keep_ratio_var = tk.BooleanVar(value=True)
-        lose_scale_row = ttk.Frame(end_frame)
-        lose_scale_row.grid(row=1, column=2, sticky="w")
-        ttk.Checkbutton(lose_scale_row, text="Boyutlandır", variable=self.lose_scale_enable_var).pack(side=tk.LEFT)
-        ttk.Label(lose_scale_row, text="W:").pack(side=tk.LEFT)
-        self.lose_scale_w_var = tk.StringVar()
-        ttk.Entry(lose_scale_row, textvariable=self.lose_scale_w_var, width=6).pack(side=tk.LEFT)
-        ttk.Label(lose_scale_row, text="H:").pack(side=tk.LEFT)
-        self.lose_scale_h_var = tk.StringVar()
-        ttk.Entry(lose_scale_row, textvariable=self.lose_scale_h_var, width=6).pack(side=tk.LEFT)
-        ttk.Checkbutton(lose_scale_row, text="Oran", variable=self.lose_scale_keep_ratio_var).pack(side=tk.LEFT)
-
-        ttk.Button(end_frame, text="Bitiş Ekranlarını Kaydet", command=self._save_end_screens).grid(row=2, column=0, columnspan=2, pady=(8,0))
+        # Seçilen sprite bölgesi için önizleme alanı
+        region_preview = ttk.LabelFrame(pane, text="Seçili Sprite Önizleme", padding=5)
+        region_preview.grid(row=1, column=0, sticky="nsew", pady=(0,5))
+        self._region_preview_max = (220, 180)
+        self.region_canvas = tk.Canvas(region_preview, width=self._region_preview_max[0], height=self._region_preview_max[1], background="white")
+        self.region_canvas.pack(fill="x", expand=False)
 
         return pane
 
     def refresh(self):
-        root = self.frame.winfo_toplevel()
-        if not hasattr(root, 'current_game_id') or not root.current_game_id:
-            return
-        self.current_game_id = root.current_game_id
 
-        # Refresh sprite sheets list
-        for item in self.sheets_tree.get_children(): self.sheets_tree.delete(item)
-        
-        sheets = self.sprite_service.get_sprite_sheets(self.current_game_id)
-        self.sheets_cache = sheets
-        for sheet in sheets:
-            self.sheets_tree.insert("", "end", iid=str(sheet.id), values=(sheet.name,))
-        
-        # Refresh expressions list
-        self._refresh_expressions()
-
-        # Refresh levels list
-        self._refresh_levels()
-        self._load_end_screens()
-        
+        # Populate assets image list
+        for item in self.sheets_tree.get_children():
+            self.sheets_tree.delete(item)
+        self._index_to_path.clear()
+        self.asset_images = self._scan_assets_images()
+        for idx, rel in enumerate(self.asset_images):
+            iid = str(idx)
+            self._index_to_path[iid] = rel
+            self.sheets_tree.insert("", "end", iid=iid, values=(rel,))
         self._on_sheet_select()
+        self._refresh_regions_list()
+
+
 
     def _on_sheet_select(self, event=None):
         selection = self.sheets_tree.selection()
         if not selection:
-            self.selected_sprite_sheet = None
-            self.delete_sheet_button.config(state="disabled")
+            self.selected_image_var.set("(yok)")
             self.image_canvas.delete("all")
             return
-        
-        sheet_id = int(selection[0])
-        self.selected_sprite_sheet = self.sprite_service.get_sprite_sheet(sheet_id)
-        self.delete_sheet_button.config(state="normal")
-        self._load_image()
-        self._refresh_definitions()
+        iid = selection[0]
+        rel = self._index_to_path.get(iid)
+        if not rel:
+            self.selected_image_var.set("(yok)")
+            self.image_canvas.delete("all")
+            return
+        self.selected_image_var.set(rel)
+        self._load_image(rel)
 
-    def _load_image(self):
+    def _load_image(self, rel_path: str):
         self.image_canvas.delete("all")
-        self.selected_area_var.set("(yok)")
-        self.last_crop_coords = None
-        if self.selected_sprite_sheet and os.path.exists(self.selected_sprite_sheet.path):
-            image = Image.open(self.selected_sprite_sheet.path)
-            self.tk_image = ImageTk.PhotoImage(image)
-            self.image_canvas.create_image(0, 0, anchor="nw", image=self.tk_image)
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        abs_path = os.path.join(project_root, rel_path)
+        if os.path.exists(abs_path):
+            image = Image.open(abs_path)
+            self._display_image_on_canvas(self.image_canvas, image, *self._main_preview_max)
 
     def _add_sheet(self):
-        if not self.current_game_id: return
-        
-        filepath = filedialog.askopenfilename(
-            title="Sprite Sheet Seç",
-            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp"), ("All Files", "*.*")]
-        )
-        if not filepath: return
-        
-        filename = os.path.basename(filepath)
-        
-        self.sprite_service.add_sprite_sheet(self.current_game_id, filename, filepath)
-        self.refresh()
+        messagebox.showinfo("Bilgi", "Bu sekmede varlık yönetimi devre dışı. Yalnızca seçim yapılır.")
 
     def _delete_sheet(self):
-        if not self.selected_sprite_sheet: return
-        if not messagebox.askyesno("Onay", f"'{self.selected_sprite_sheet.name}' dosyasını ve tüm tanımlarını silmek istediğinize emin misiniz?"):
-            return
-        
-        self.sprite_service.delete_sprite_sheet(self.selected_sprite_sheet.id)
-        self.refresh()
+        messagebox.showinfo("Bilgi", "Bu sekmede silme işlemi devre dışı.")
 
     def _open_cropper(self, event=None):
-        if not self.selected_sprite_sheet: return
-        
-        cropper = Cropper(self.frame, self.selected_sprite_sheet.path)
+        selection = self.sheets_tree.selection()
+        if not selection:
+            return
+        iid = selection[0]
+        rel = self._index_to_path.get(iid)
+        if not rel:
+            return
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        abs_path = os.path.join(project_root, rel)
+        if not os.path.exists(abs_path):
+            messagebox.showwarning("Uyarı", "Dosya bulunamadı.")
+            return
+        cropper = Cropper(self.frame, abs_path)
         result = cropper.show()
-        
         if result:
-            self.last_crop_coords = result
-            self.selected_area_var.set(f"(x={result['x']}, y={result['y']}, w={result['width']}, h={result['height']})")
-            # Draw overlay rectangle on canvas
-            self.image_canvas.delete("selection_rect")
-            self.image_canvas.create_rectangle(
-                result['x'], result['y'], result['x']+result['width'], result['y']+result['height'],
-                outline='red', width=2, tags=("selection_rect",)
-            )
-            # Enable assign button if expression is selected
-            self._update_assign_button_state()
+            # prompt for a region name
+            from tkinter.simpledialog import askstring
+            name = askstring("İsim", "Sprite adı:", parent=self.frame)
+            if not name:
+                return
+            try:
+                # Save to DB
+                self.sprite_service.upsert_sprite_region(rel, name.strip(), result)
+                messagebox.showinfo("Kayıt", "Sprite bölgesi kaydedildi.")
+            except Exception as e:
+                messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
+            finally:
+                self._refresh_regions_list()
+
     
     def _refresh_definitions(self):
-        for item in self.defs_tree.get_children():
-            self.defs_tree.delete(item)
-        if not self.selected_sprite_sheet:
-            return
-        defs = self.sprite_service.get_all_definitions_for_sheet(self.selected_sprite_sheet.id)
-        for d in defs:
-            expr_label = self.expressions_index.get(d.expression_id, f"(expr #{d.expression_id})")
-            coords_text = f"{d.x}, {d.y}, {d.width}, {d.height}"
-            self.defs_tree.insert("", "end", values=(expr_label, coords_text))
+        return
 
     def _assign_expression(self):
-        if not self.selected_sprite_sheet:
-            messagebox.showwarning("Uyarı", "Lütfen önce bir sprite sheet seçin.")
-            return
-        if not self.last_crop_coords:
-            messagebox.showwarning("Uyarı", "Lütfen önce bir bölge seçin (Bölge Seç).")
-            return
-        label = self.expr_var.get()
-        if not label or label not in self.expr_label_to_id:
-            messagebox.showwarning("Uyarı", "Lütfen bir ifade seçin.")
-            return
-        expr_id = self.expr_label_to_id[label]
-        coords = self.last_crop_coords
-        try:
-            self.sprite_service.add_or_update_sprite_definition(
-                self.selected_sprite_sheet.id, expr_id, coords
-            )
-            self._refresh_definitions()
-            messagebox.showinfo("Başarılı", "Bölge ifade ile ilişkilendirildi.")
-        except Exception as e:
-            messagebox.showerror("Hata", f"Tanım kaydedilirken hata: {e}")
+        return
 
     def _refresh_expressions(self):
-        self.expressions_index.clear()
-        self.expr_label_to_id.clear()
-        labels: List[str] = []
-        try:
-            levels = self.level_service.get_levels(self.current_game_id)
-            for lvl in levels:
-                exprs = self.expression_service.get_expressions(lvl.id)
-                for ex in exprs:
-                    label = f"Seviye {lvl.level_number}: {ex.expression}"
-                    self.expressions_index[ex.id] = label
-                    self.expr_label_to_id[label] = ex.id
-                    labels.append(label)
-        except Exception:
-            pass
-        self.expr_combo['values'] = labels
-        self.expr_combo.set(labels[0] if labels else "")
-        self._update_assign_button_state()
+        return
 
     def _update_assign_button_state(self):
-        has_coords = self.last_crop_coords is not None
-        has_expr = bool(self.expr_var.get())
-        state = "normal" if has_coords and has_expr else "disabled"
-        self.assign_button.config(state=state)
+        return
 
     # ------- Level assets UI logic -------
     def _refresh_levels(self):
-        try:
-            self.levels_cache = self.level_service.get_levels(self.current_game_id)
-            labels = [f"{lvl.level_number} - {lvl.level_name}" for lvl in self.levels_cache]
-            self.level_sel['values'] = labels
-            if labels:
-                self.level_sel.set(labels[0])
-                self._load_level_assets()
-        except Exception:
-            self.levels_cache = []
-            self.level_sel['values'] = []
-
-        # Populate paddle sheet list
-        sheet_labels = [f"{s.id} - {s.name}" for s in self.sheets_cache]
-        self.paddle_sheet_combo['values'] = sheet_labels
-        if sheet_labels:
-            self.paddle_sheet_combo.set(sheet_labels[0])
+        return
 
     def _get_selected_level(self):
         if not self.levels_cache:
@@ -430,191 +288,266 @@ class SpritesTab:
         return self.levels_cache[idx]
 
     def _load_level_assets(self):
-        lvl = self._get_selected_level()
-        if not lvl:
-            return
-        settings = self.game_service.get_settings(lvl.game_id)
-        self.level_bg_var.set(settings.get(f"level_{lvl.level_number}_background_path", ""))
-        paddle_json = settings.get(f"level_{lvl.level_number}_paddle_sprite", "")
-        if paddle_json:
-            try:
-                info = json.loads(paddle_json)
-                self.paddle_area_var.set(f"sheet {info.get('sprite_id')} @ x={info.get('x')}, y={info.get('y')}, w={info.get('width')}, h={info.get('height')}")
-                # set sheet combo to matching sheet
-                for i, s in enumerate(self.sheets_cache):
-                    if s.id == info.get('sprite_id'):
-                        self.paddle_sheet_combo.set(f"{s.id} - {s.name}")
-                        break
-            except Exception:
-                self.paddle_area_var.set("(yok)")
-        else:
-            self.paddle_area_var.set("(yok)")
+        return
 
     def _browse_level_bg(self):
-        path = filedialog.askopenfilename(
-            title="Seviye Arkaplanı Seç",
-            filetypes=[("Görüntü Dosyaları", "*.png;*.jpg;*.jpeg;*.bmp"), ("Tümü", "*.*")]
-        )
-        if path:
-            self.level_bg_var.set(path)
+        return
 
     def _select_paddle_region(self):
-        sheet_label = self.paddle_sheet_var.get()
-        if not sheet_label:
-            messagebox.showwarning("Uyarı", "Önce bir sprite sheet seçin.")
-            return
-        try:
-            sheet_id = int(sheet_label.split(' - ')[0])
-        except Exception:
-            messagebox.showwarning("Uyarı", "Geçerli bir sprite sheet seçin.")
-            return
-        sheet = next((s for s in self.sheets_cache if s.id == sheet_id), None)
-        if not sheet or not os.path.exists(sheet.path):
-            messagebox.showerror("Hata", "Sprite sheet bulunamadı.")
-            return
-        cropper = Cropper(self.frame, sheet.path)
-        result = cropper.show()
-        if result:
-            self.paddle_area_var.set(f"sheet {sheet.id} @ x={result['x']}, y={result['y']}, w={result['width']}, h={result['height']}")
-            # temporarily store in instance for saving
-            self._paddle_temp = {**result, 'sprite_id': sheet.id}
+        return
 
     def _save_level_assets(self):
-        lvl = self._get_selected_level()
-        if not lvl:
-            messagebox.showwarning("Uyarı", "Önce bir seviye seçin.")
-            return
-        # background copy
-        src_bg = self.level_bg_var.get().strip()
-        if src_bg:
-            try:
-                if not os.path.isfile(src_bg):
-                    raise FileNotFoundError("Seçilen arkaplan dosyası bulunamadı.")
-                dst_dir = os.path.join('assets', 'games', str(lvl.game_id), 'levels', str(lvl.level_number), 'backgrounds')
-                os.makedirs(dst_dir, exist_ok=True)
-                safe_name = self._sanitize_filename(os.path.basename(src_bg))
-                dst_path = self._avoid_collision(dst_dir, safe_name)
-                if os.path.abspath(src_bg) != os.path.abspath(dst_path):
-                    import shutil
-                    shutil.copy2(src_bg, dst_path)
-                rel = dst_path.replace('\\', '/')
-                self.game_service.update_setting(lvl.game_id, f"level_{lvl.level_number}_background_path", rel)
-            except Exception as e:
-                messagebox.showwarning("Uyarı", f"Seviye arkaplanı kaydedilemedi: {e}")
-        # paddle sprite save
-        info = getattr(self, '_paddle_temp', None)
-        if info:
-            try:
-                payload = json.dumps(info)
-                self.game_service.update_setting(lvl.game_id, f"level_{lvl.level_number}_paddle_sprite", payload)
-            except Exception as e:
-                messagebox.showwarning("Uyarı", f"Paddle bilgisi kaydedilemedi: {e}")
-        messagebox.showinfo("Başarılı", "Seviye varlıkları kaydedildi.")
+        return
 
     # ------- End screens UI logic -------
     def _load_end_screens(self):
-        if not self.current_game_id:
-            return
-        settings = self.game_service.get_settings(self.current_game_id)
-        self.win_bg_var.set(settings.get('end_win_background_path', ''))
-        self.lose_bg_var.set(settings.get('end_lose_background_path', ''))
+        return
 
     def _browse_win_bg(self):
-        path = filedialog.askopenfilename(
-            title="Kazanma Arkaplanı Seç",
-            filetypes=[("Görüntü Dosyaları", "*.png;*.jpg;*.jpeg;*.bmp"), ("Tümü", "*.*")]
-        )
-        if path:
-            self.win_bg_var.set(path)
+        return
 
     def _browse_lose_bg(self):
-        path = filedialog.askopenfilename(
-            title="Kaybetme Arkaplanı Seç",
-            filetypes=[("Görüntü Dosyaları", "*.png;*.jpg;*.jpeg;*.bmp"), ("Tümü", "*.*")]
-        )
-        if path:
-            self.lose_bg_var.set(path)
+        return
 
     def _save_end_screens(self):
-        if not self.current_game_id:
-            return
-        tasks = [
-            ('end_win_background_path', self.win_bg_var, 'end_screens', self.win_scale_enable_var, self.win_scale_w_var, self.win_scale_h_var, self.win_scale_keep_ratio_var),
-            ('end_lose_background_path', self.lose_bg_var, 'end_screens', self.lose_scale_enable_var, self.lose_scale_w_var, self.lose_scale_h_var, self.lose_scale_keep_ratio_var)
-        ]
-        for key, var, subdir, ena, wv, hv, keep in tasks:
-            src = var.get().strip()
-            if not src:
-                continue
-            try:
-                dst_dir = os.path.join('assets', 'games', str(self.current_game_id), subdir)
-                os.makedirs(dst_dir, exist_ok=True)
-                dst_path = self._resize_and_copy_image(src, dst_dir, ena.get(), wv.get().strip(), hv.get().strip(), keep.get())
-                rel = dst_path.replace('\\', '/')
-                self.game_service.update_setting(self.current_game_id, key, rel)
-            except Exception as e:
-                messagebox.showwarning("Uyarı", f"{key} kaydedilemedi: {e}")
-        messagebox.showinfo("Başarılı", "Bitiş ekranları kaydedildi.")
+        return
 
     # ------- Helpers -------
     def _sanitize_filename(self, name: str) -> str:
-        name = name.strip().lower()
-        name = unicodedata.normalize('NFKD', name)
-        name = name.encode('ascii', 'ignore').decode('ascii')
-        base, ext = os.path.splitext(name)
-        safe_base = ''.join(c if c.isalnum() or c in ('-', '_') else '_' for c in base)
-        safe_ext = ''.join(c if c.isalnum() else '' for c in ext)
-        ext = ('.' + safe_ext) if safe_ext else ''
-        if not safe_base:
-            safe_base = 'file'
-        return safe_base + ext
+        return name
 
     def _avoid_collision(self, directory: str, filename: str) -> str:
-        base, ext = os.path.splitext(filename)
-        candidate = os.path.join(directory, filename)
-        counter = 1
-        while os.path.exists(candidate):
-            candidate = os.path.join(directory, f"{base}_{counter}{ext}")
-            counter += 1
-        return candidate
+        return os.path.join(directory, filename)
 
     def _resize_and_copy_image(self, src_path: str, dst_dir: str, enable_scale: bool, w_str: str, h_str: str, keep_ratio: bool) -> str:
-        if not os.path.isfile(src_path):
-            raise FileNotFoundError("Kaynak dosya bulunamadı")
-        basename = os.path.basename(src_path)
-        safe_name = self._sanitize_filename(basename)
-        dst_path = self._avoid_collision(dst_dir, safe_name)
-        if not enable_scale:
-            if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                import shutil
-                shutil.copy2(src_path, dst_path)
-            return dst_path
-        img = Image.open(src_path)
-        orig_w, orig_h = img.size
-        new_w = int(w_str) if w_str.isdigit() and int(w_str) > 0 else None
-        new_h = int(h_str) if h_str.isdigit() and int(h_str) > 0 else None
-        if keep_ratio:
-            if new_w and not new_h:
-                new_h = int(round(orig_h * (new_w / orig_w)))
-            elif new_h and not new_w:
-                new_w = int(round(orig_w * (new_h / orig_h)))
-            elif new_w and new_h:
-                new_h = int(round(orig_h * (new_w / orig_w)))
+        return src_path
+
+    # -------- Assets scanning --------
+    def _scan_assets_images(self) -> List[str]:
+        """Recursively scan assets/ and assets/games/<game_id>/ for image files, plus img/ fallback.
+
+        Returns relative paths from project root using forward slashes.
+        """
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        assets_root = os.path.join(project_root, "assets")
+        # per_game_root = os.path.join(assets_root, "games", str(game_id) if game_id else "")
+        img_fallback = os.path.join(project_root, "img")
+        img_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
+
+        def walk_collect(base_dir: str) -> List[str]:
+            items: List[str] = []
+            if os.path.isdir(base_dir):
+                for root, _, fnames in os.walk(base_dir):
+                    for fn in fnames:
+                        ext = os.path.splitext(fn)[1].lower()
+                        if ext in img_exts:
+                            abs_p = os.path.join(root, fn)
+                            rel = os.path.relpath(abs_p, project_root).replace('\\', '/')
+                            items.append(rel)
+            return items
+
+        images: List[str] = []
+        images.extend(walk_collect(assets_root))
+        # images.extend(walk_collect(per_game_root))
+        images.extend(walk_collect(img_fallback))
+        # de-duplicate preserving order
+        seen = set(); out = []
+        for p in images:
+            if p not in seen:
+                seen.add(p); out.append(p)
+        return sorted(out, key=lambda p: p.lower())
+
+    # -------- Sprite regions UI (DB-backed) --------
+
+    # -------- Regions UI helpers --------
+    def _refresh_regions_list(self) -> None:
+        for iid in self.regions_tree.get_children():
+            self.regions_tree.delete(iid)
+        self._regions_cache = []
+        rows = self.sprite_service.list_sprite_regions()
+        self._regions_cache = rows
+        for i, e in enumerate(rows):
+            name = e.get("name", "?")
+            img = e.get("image_path", "")
+            coords = f"{e.get('x',0)}, {e.get('y',0)}, {e.get('width',0)}, {e.get('height',0)}"
+            iid = str(i)
+            self.regions_tree.insert("", tk.END, iid=iid, values=(name, img, coords))
+        # Liste yenilendikten sonra küçük önizlemeyi güncelle
+        self._update_region_preview()
+
+    def _update_region_preview(self) -> None:
+        """Seçili sprite bölgesini küçük önizleme alanında göster."""
+        self.region_canvas.delete("all")
+        entry = self._get_selected_region_entry()
+        if not entry:
+            return
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        abs_path = os.path.join(project_root, entry.get("image_path", ""))
+        if not os.path.isfile(abs_path):
+            return
+        try:
+            img = Image.open(abs_path)
+            x = int(entry.get('x', 0)); y = int(entry.get('y', 0))
+            w = int(entry.get('width', 0)); h = int(entry.get('height', 0))
+            if w > 0 and h > 0:
+                img = img.crop((x, y, x + w, y + h))
+            self._display_image_on_canvas(self.region_canvas, img, *self._region_preview_max)
+        except Exception:
+            pass
+
+    def _display_image_on_canvas(self, canvas: tk.Canvas, pil_image: Image.Image, max_w: int, max_h: int) -> None:
+        """PIL görüntüyü orana sadık kalarak belirtilen alana sığdırıp canvas'a çizer."""
+        try:
+            iw, ih = pil_image.size
+            scale = min(max_w / max(1, iw), max_h / max(1, ih))
+            new_w = max(1, int(iw * scale))
+            new_h = max(1, int(ih * scale))
+            resized = pil_image.resize((new_w, new_h), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(resized)
+            # Canvas boyutunu sabit tut (görsel merkezli)
+            canvas.configure(width=max_w, height=max_h)
+            x = (max_w - new_w) // 2
+            y = (max_h - new_h) // 2
+            canvas.create_image(x, y, anchor="nw", image=photo)
+            # Referansı sakla; aksi halde GC edilir
+            if canvas is self.image_canvas:
+                self.tk_image = photo
+            elif canvas is self.region_canvas:
+                self.tk_region_image = photo
+        except Exception:
+            pass
+
+    def _get_selected_region_entry(self) -> Optional[Dict]:
+        sel = self.regions_tree.selection()
+        if not sel:
+            return None
+        idx = int(sel[0])
+        lst = getattr(self, '_regions_cache', []) or []
+        if 0 <= idx < len(lst):
+            return lst[idx]
+        return None
+
+    def _rename_region(self) -> None:
+        entry = self._get_selected_region_entry()
+        if not entry:
+            return
+        from tkinter.simpledialog import askstring
+        new_name = askstring("Yeniden Adlandır", "Yeni ad:", initialvalue=entry.get("name",""), parent=self.frame)
+        if not new_name:
+            return
+        self.sprite_service.rename_sprite_region(entry.get("image_path",""), entry.get("name",""), new_name.strip())
+        self._refresh_regions_list()
+
+    def _delete_region(self) -> None:
+        entry = self._get_selected_region_entry()
+        if not entry:
+            return
+        if not messagebox.askyesno("Onay", f"'{entry.get('name','?')}' silinsin mi?"):
+            return
+        self.sprite_service.delete_sprite_region(entry.get("image_path",""), entry.get("name",""))
+        self._refresh_regions_list()
+
+    def _recrop_region(self) -> None:
+        entry = self._get_selected_region_entry()
+        if not entry:
+            return
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        abs_path = os.path.join(project_root, entry.get("image_path",""))
+        if not os.path.isfile(abs_path):
+            messagebox.showwarning("Uyarı", "Görsel bulunamadı.")
+            return
+        cropper = Cropper(self.frame, abs_path)
+        result = cropper.show()
+        if result:
+            # overwrite coords
+            self.sprite_service.upsert_sprite_region(entry.get("image_path",""), entry.get("name",""), result)
+            self._refresh_regions_list()
+
+    def _debug_regions_check(self) -> None:
+        """DB'deki sprite_regions kayıtlarını ve dosya yollarını kontrol edip özetler.
+
+        - Kayıt sayısı, mevcut dosya sayısı, eksik dosya sayısı
+        - Olası yol uyumsuzlukları: 'assets/' prefix eksik/fazla
+        - Detaylar konsola yazdırılır.
+        """
+        try:
+            rows = self.sprite_service.list_sprite_regions()
+        except Exception as e:
+            messagebox.showerror("Debug", f"DB okunamadı: {e}")
+            return
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        total = len(rows)
+        exists_cnt = 0
+        missing = []
+        fix_suggestions = []
+        for r in rows:
+            p = r.get("image_path", "")
+            abs_p = os.path.join(project_root, p)
+            if os.path.isfile(abs_p):
+                exists_cnt += 1
+                continue
+            # try alt with assets/ prefix
+            if not p.startswith("assets/"):
+                alt = os.path.join(project_root, "assets", p)
+                if os.path.isfile(alt):
+                    fix_suggestions.append((p, f"assets/{p}"))
             else:
-                if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                    import shutil
-                    shutil.copy2(src_path, dst_path)
-                return dst_path
-        else:
-            if not new_w and not new_h:
-                if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                    import shutil
-                    shutil.copy2(src_path, dst_path)
-                return dst_path
-            if not new_w:
-                new_w = orig_w
-            if not new_h:
-                new_h = orig_h
-        resized = img.resize((new_w, new_h), Image.LANCZOS)
-        resized.save(dst_path)
-        return dst_path
+                # maybe extra assets/ added
+                no_pref = p[len("assets/"):]
+                alt = os.path.join(project_root, no_pref)
+                if os.path.isfile(alt):
+                    fix_suggestions.append((p, no_pref))
+            missing.append(p)
+        # Print details to console
+        print("[Sprites Debug] total rows=", total)
+        print("[Sprites Debug] existing files=", exists_cnt)
+        print("[Sprites Debug] missing files=", len(missing))
+        for p in missing:
+            print("  MISSING:", p)
+        if fix_suggestions:
+            print("[Sprites Debug] path fix suggestions (stored -> suggested):")
+            for a, b in fix_suggestions:
+                print("  ", a, "->", b)
+        # Messagebox summary
+        sample_missing = ", ".join(missing[:3]) if missing else "yok"
+        sample_fix = ", ".join([f"{a} -> {b}" for a,b in fix_suggestions[:3]]) if fix_suggestions else "yok"
+        message = (
+            f"Toplam kayıt: {total}\n"
+            f"Mevcut dosya: {exists_cnt}\n"
+            f"Eksik dosya: {len(missing)}\n"
+            f"Örnek eksik: {sample_missing}\n"
+            f"Önerilen yol düzeltmeleri: {sample_fix}\n\n"
+            "Detaylar konsola yazdırıldı."
+        )
+        messagebox.showinfo("Sprite Debug", message)
+
+    # ----- Legacy metadata migration (one-time) -----
+    def _metadata_path(self) -> str:
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        return os.path.join(project_root, "assets", "metadata.json")
+
+    def _read_metadata_sprite_regions(self) -> List[Dict]:
+        path = self._metadata_path()
+        if not os.path.isfile(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            lst = data.get("sprite_regions") or []
+            # Normalize keys 'image' -> 'image_path'
+            out: List[Dict] = []
+            for e in lst:
+                img = e.get("image") or e.get("image_path")
+                if img and all(k in e for k in ("x","y","width","height")):
+                    out.append({
+                        "image_path": img,
+                        "name": e.get("name", ""),
+                        "x": int(e["x"]),
+                        "y": int(e["y"]),
+                        "width": int(e["width"]),
+                        "height": int(e["height"]),
+                    })
+            return out
+        except Exception:
+            return []
+

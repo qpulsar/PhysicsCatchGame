@@ -8,18 +8,29 @@ from ...core.services import GameService, LevelService, ExpressionService
 
 # Copied from the old expressions_tab.py
 class AddExpressionDialog(tk.Toplevel):
-    """Dialog for adding a new expression."""
-    # ... (Implementation is the same as the one from expressions_tab.py) ...
-    def __init__(self, parent):
+    """Dialog for adding or editing an expression.
+
+    If ``initial`` is provided, dialog fields will be pre-populated and the title
+    can be overridden via ``title`` to act like an edit dialog.
+    """
+    # ... (Implementation is based on the one from expressions_tab.py) ...
+    def __init__(self, parent, initial: Optional[Tuple[str, bool]] = None, title: str = "Yeni İfade Ekle"):
         super().__init__(parent)
-        self.title("Yeni İfade Ekle")
+        self.title(title)
         self.transient(parent)
         self.grab_set()
         self.resizable(False, False)
         
         self.result: Optional[Tuple[str, bool]] = None
+        self._initial = initial
 
         self._create_widgets()
+        # Pre-populate if initial values are provided
+        if self._initial is not None:
+            text, is_correct = self._initial
+            self.expression_text.delete("1.0", "end")
+            self.expression_text.insert("1.0", text)
+            self.is_correct_var.set(bool(is_correct))
         self._center_window(parent)
 
     def _create_widgets(self):
@@ -426,10 +437,61 @@ class LevelsTab:
             except Exception as e:
                 messagebox.showerror("Hata", f"Seviye eklenirken bir hata oluştu: {e}", parent=self.frame)
     
-    def _start_level_edit(self): pass # Placeholder
-    def _delete_level(self): pass # Placeholder
-    def _cancel_level_edit(self): pass # Placeholder
-    def _on_level_double_click(self, event): pass # Placeholder
+    def _start_level_edit(self):
+        """Start editing the selected level by opening a pre-filled dialog."""
+        level_id = self._get_selected_level_id()
+        if not level_id:
+            return
+        level = self.level_service.get_level(level_id)
+        if not level:
+            messagebox.showerror("Hata", "Seviye bulunamadı.", parent=self.frame)
+            return
+
+        # Prepare defaults from existing level
+        defaults = {
+            'level_number': level.level_number,
+            'wrong_answer_percentage': level.wrong_answer_percentage,
+            'item_speed': level.item_speed,
+            'max_items_on_screen': level.max_items_on_screen,
+        }
+
+        dialog = AddLevelDialog(self.frame, defaults=defaults)
+        # Pre-fill name and description fields
+        dialog.entries['level_name'].delete(0, 'end')
+        dialog.entries['level_name'].insert(0, level.level_name or "")
+        dialog.entries['level_description'].delete("1.0", "end")
+        dialog.entries['level_description'].insert("1.0", level.level_description or "")
+
+        result = dialog.show()
+        if result:
+            try:
+                update_data = {
+                    'level_number': result['level_number'],
+                    'level_name': result['level_name'],
+                    'level_description': result['level_description'],
+                    'wrong_answer_percentage': result['wrong_answer_percentage'],
+                    'item_speed': result['item_speed'],
+                    'max_items_on_screen': result['max_items_on_screen'],
+                }
+                self.level_service.update_level(level_id, update_data)
+                self.refresh()
+                messagebox.showinfo("Başarılı", "Seviye güncellendi.", parent=self.frame)
+            except Exception as e:
+                messagebox.showerror("Hata", f"Seviye güncellenirken hata: {e}", parent=self.frame)
+
+    def _delete_level(self):
+        """Placeholder for level delete (not part of current issue)."""
+        pass
+
+    def _cancel_level_edit(self):
+        """Clear any in-progress level edit state (no inline edit currently)."""
+        self._level_edit_item = None
+        self._level_edit_widget = None
+        self._level_temp_edit_values = {}
+
+    def _on_level_double_click(self, event):
+        """Double-click on a level row will open the edit dialog."""
+        self._start_level_edit()
 
     def _add_expression(self):
         level_id = self._get_selected_level_id()
@@ -446,7 +508,41 @@ class LevelsTab:
             except Exception as e:
                 messagebox.showerror("Hata", f"İfade eklenirken hata: {e}", parent=self.frame)
     
-    def _start_expr_edit(self): pass # Placeholder
-    def _delete_expression(self): pass # Placeholder
-    def _cancel_expr_edit(self): pass # Placeholder
-    def _on_expr_double_click(self, event): pass # Placeholder
+    def _start_expr_edit(self):
+        """Start editing the selected expression using a simple dialog."""
+        expr_id = self._get_selected_expression_id()
+        if not expr_id:
+            return
+
+        # Get current values from the treeview
+        item_vals = self.expr_tree.item(str(expr_id), 'values')
+        if not item_vals or len(item_vals) < 2:
+            messagebox.showerror("Hata", "İfade bilgileri alınamadı.", parent=self.frame)
+            return
+        current_text = item_vals[0]
+        current_is_correct = (item_vals[1] == "Evet")
+
+        dialog = AddExpressionDialog(self.frame, initial=(current_text, current_is_correct), title="İfadeyi Düzenle")
+        result = dialog.show()
+        if result:
+            text, is_correct = result
+            try:
+                self.expression_service.update_expression(expr_id, text, is_correct)
+                self._refresh_expressions()
+                messagebox.showinfo("Başarılı", "İfade güncellendi.", parent=self.frame)
+            except Exception as e:
+                messagebox.showerror("Hata", f"İfade güncellenirken hata: {e}", parent=self.frame)
+
+    def _delete_expression(self):
+        """Placeholder for expression delete (not part of current issue)."""
+        pass
+
+    def _cancel_expr_edit(self):
+        """Clear any in-progress expression edit state (no inline edit currently)."""
+        self._expr_edit_item = None
+        self._expr_edit_widget = None
+        self._expr_temp_edit_values = {}
+
+    def _on_expr_double_click(self, event):
+        """Double-click on an expression row will open the edit dialog."""
+        self._start_expr_edit()

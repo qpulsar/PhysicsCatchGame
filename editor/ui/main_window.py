@@ -3,15 +3,21 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, Dict, Any
 import os
+import json
 from PIL import Image, ImageTk
 
 from ..core.models import Game
-from ..core.services import GameService, LevelService, ExpressionService, SpriteService
+from ..core.services import GameService, LevelService, ExpressionService, SpriteService, ScreenService
 from ..database.database import DatabaseManager
 from .tabs.levels_tab import LevelsTab
 from .tabs.settings_tab import SettingsTab
 from .tabs.sprites_tab import SpritesTab
+from .tabs.media_tab import MediaTab
+from .tabs.screens_tab import ScreensTab
 from .game_dialog import GameDialog
+from .screen_designer import ScreenDesignerWindow
+from .media_manager import MediaManagerWindow
+from .sprites_manager import SpritesManagerWindow
 
 
 class GamesListFrame(ttk.Frame):
@@ -58,10 +64,18 @@ class GamesListFrame(ttk.Frame):
         for game in self.games:
             self.games_tree.insert("", tk.END, iid=str(game.id), values=(game.name,))
         
-        if select_id:
-            if self.games_tree.exists(str(select_id)):
-                self.games_tree.selection_set(str(select_id))
-                self.games_tree.focus(str(select_id))
+        if select_id and self.games_tree.exists(str(select_id)):
+            self.games_tree.selection_set(str(select_id))
+            self.games_tree.focus(str(select_id))
+        else:
+            # Auto-select the first game if available
+            children = self.games_tree.get_children()
+            if children:
+                first_iid = children[0]
+                self.games_tree.selection_set(first_iid)
+                self.games_tree.focus(first_iid)
+                # Trigger selection handler to update dashboard tabs
+                self._on_select()
 
     def get_selected_game_id(self) -> Optional[int]:
         """Returns the ID of the selected game, or None."""
@@ -93,13 +107,16 @@ class GamesListFrame(ttk.Frame):
 
 class DashboardFrame(ttk.Frame):
     """The main dashboard frame, showing game details and management tabs."""
-    def __init__(self, parent, game_service: GameService, level_service: LevelService, expression_service: ExpressionService, sprite_service: SpriteService):
+    def __init__(self, parent, game_service: GameService, level_service: LevelService, expression_service: ExpressionService, sprite_service: SpriteService, screen_service: ScreenService):
         super().__init__(parent)
         self.game_service = game_service
         self.level_service = level_service
         self.expression_service = expression_service
         self.sprite_service = sprite_service
+        self.screen_service = screen_service
         self.current_game: Optional[Game] = None
+        # Proje kökü (assets için mutlak yol çözmekte kullanılır)
+        self._project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
         
         # --- Layout ---
         self.columnconfigure(0, weight=1)
@@ -108,6 +125,9 @@ class DashboardFrame(ttk.Frame):
         # --- Widgets ---
         self.title_label = ttk.Label(self, text="Lütfen bir oyun seçin.", style="Header.TLabel")
         self.title_label.grid(row=0, column=0, sticky="w", padx=10, pady=5)
+        # "Ekranlar" sekmesine hızlı erişim sağlayan buton
+     #   self.design_button = ttk.Button(self, text="Ekranlar", command=self._select_screens_tab, state="disabled")
+     #   self.design_button.grid(row=0, column=1, sticky="e", padx=10, pady=5)
         
         # Notebook for game management
         self.notebook = ttk.Notebook(self)
@@ -130,6 +150,7 @@ class DashboardFrame(ttk.Frame):
         if self.current_game:
             self.title_label.config(text=self.current_game.name)
             self.desc_label.config(text=self.current_game.description or "Açıklama yok.")
+            #self.design_button.config(state="normal")
             
             settings = self.game_service.get_settings(self.current_game.id)
             settings_text = "\n".join([f"{k}: {v}" for k, v in settings.settings.items()])
@@ -149,6 +170,7 @@ class DashboardFrame(ttk.Frame):
             self.settings_text.config(state="normal")
             self.settings_text.delete("1.0", tk.END)
             self.settings_text.config(state="disabled")
+            #self.design_button.config(state="disabled")
 
             # Disable tabs if no game is selected
             for i in range(self.notebook.index("end")):
@@ -186,6 +208,17 @@ class DashboardFrame(ttk.Frame):
         self._gallery_images = []
         
         return frame
+
+    def _select_screens_tab(self):
+        """"Ekranlar" sekmesine geçiş yapar (varsa)."""
+        try:
+            end = self.notebook.index("end")
+            for i in range(end):
+                if self.notebook.tab(i, option='text') == "Ekranlar":
+                    self.notebook.select(i)
+                    return
+        except Exception:
+            pass
         
     def _update_tabs(self):
         """Creates or refreshes the management tabs."""
@@ -198,14 +231,28 @@ class DashboardFrame(ttk.Frame):
             self.notebook.forget(1)
         
         if self.current_game:
-            self.tabs['levels'] = LevelsTab(self.notebook, self.game_service, self.level_service, self.expression_service)
-            self.notebook.add(self.tabs['levels'].frame, text="Seviyeler")
+            # Levels tab
+            try:
+                self.tabs['levels'] = LevelsTab(self.notebook, self.game_service, self.level_service, self.expression_service)
+                self.notebook.add(self.tabs['levels'].frame, text="Seviyeler")
+            except Exception as e:
+                messagebox.showerror("Sekme Hatası", f"Seviyeler sekmesi yüklenemedi: {e}")
 
-            self.tabs['sprites'] = SpritesTab(self.notebook, self.sprite_service, self.expression_service, self.level_service, self.game_service)
-            self.notebook.add(self.tabs['sprites'].frame, text="Sprite Yönetimi")
+            # Sprite ve Medya yönetimi ayrı pencerelere taşındı (navbar düğmeleriyle açılır)
 
-            self.tabs['settings'] = SettingsTab(self.notebook, self.game_service)
-            self.notebook.add(self.tabs['settings'].frame, text="Ayarlar")
+            # Settings tab
+            try:
+                self.tabs['settings'] = SettingsTab(self.notebook, self.game_service)
+                self.notebook.add(self.tabs['settings'].frame, text="Ayarlar")
+            except Exception as e:
+                messagebox.showerror("Sekme Hatası", f"Ayarlar sekmesi yüklenemedi: {e}")
+
+            # Screens tab
+            try:
+                self.tabs['screens'] = ScreensTab(self.notebook, self.game_service, self.level_service, self.screen_service, self.sprite_service)
+                self.notebook.add(self.tabs['screens'].frame, text="Ekranlar")
+            except Exception as e:
+                messagebox.showerror("Sekme Hatası", f"Ekranlar sekmesi yüklenemedi: {e}")
             
             self.refresh_tabs()
 
@@ -217,6 +264,17 @@ class DashboardFrame(ttk.Frame):
                     tab.refresh()
 
     def _refresh_media_gallery(self):
+        """Özet sekmesindeki medya galerisini yalnızca bu oyunda kullanılan
+        medya ile doldurur.
+
+        - Oyun ayarlarında geçen yollar (başlangıç/bitış arkaplanları, seviye
+          arkaplanları, müzik vb.) gösterilir.
+        - Sprite görselleri, yalnızca bu oyundaki seviyelerdeki ifadeler için
+          tanımlanmış sprite tanımlarının bağlı olduğu sprite sheet'lerden
+          gösterilir.
+        - Global metadata.json açıklamalı medyalar artık eklenmez (yalnızca
+          bu oyuna ait kullanım hedeflenir).
+        """
         for child in self.gallery_inner.winfo_children():
             child.destroy()
         self._gallery_images.clear()
@@ -225,6 +283,7 @@ class DashboardFrame(ttk.Frame):
         game_id = self.current_game.id
         settings = self.game_service.get_settings(game_id)
         items = []
+        seen_paths = set()
         label_map = {
             'start_background_path': 'Başlangıç Arkaplanı',
             'thumbnail_path': 'Küçük Resim',
@@ -235,13 +294,105 @@ class DashboardFrame(ttk.Frame):
         for key, label in label_map.items():
             path = settings.get(key)
             if path:
-                items.append({'type': 'setting', 'key': key, 'label': label, 'path': path})
+                if path not in seen_paths:
+                    items.append({'type': 'setting', 'key': key, 'label': label, 'path': path})
+                    seen_paths.add(path)
         for k, v in settings.settings.items():
             if k.startswith('level_') and k.endswith('_background_path') and v:
-                items.append({'type': 'setting', 'key': k, 'label': k.replace('_', ' ').title(), 'path': v})
-        sheets = self.sprite_service.get_sprite_sheets(game_id)
-        for s in sheets:
-            items.append({'type': 'sprite', 'sprite_id': s.id, 'label': f"Sprite: {s.name}", 'path': s.path})
+                if v not in seen_paths:
+                    items.append({'type': 'setting', 'key': k, 'label': k.replace('_', ' ').title(), 'path': v})
+                    seen_paths.add(v)
+        # Açılış ekranı (opening) tasarımından referans verilen medya
+        try:
+            sc = self.screen_service.get_screen(game_id, "opening")
+            if sc and getattr(sc, 'data_json', None):
+                import json as _json
+                data = _json.loads(sc.data_json)
+                # background image
+                bg_rel = ((data.get('background') or {}).get('image')) or ''
+                if bg_rel:
+                    if bg_rel not in seen_paths:
+                        items.append({'type': 'screen', 'key': 'opening_bg', 'label': 'Açılış: Arkaplan', 'path': bg_rel})
+                        seen_paths.add(bg_rel)
+                # music
+                mus_rel = data.get('music') or ''
+                if mus_rel and mus_rel not in seen_paths:
+                    items.append({'type': 'screen', 'key': 'opening_music', 'label': 'Açılış: Müzik', 'path': mus_rel})
+                    seen_paths.add(mus_rel)
+                # widget sprite image'ları
+                for w in (data.get('widgets') or []):
+                    sp = (w.get('sprite') or {}) if isinstance(w, dict) else {}
+                    img_rel = sp.get('image')
+                    if img_rel and img_rel not in seen_paths:
+                        items.append({'type': 'screen', 'key': 'opening_widget_sprite', 'label': 'Açılış: Sprite Görseli', 'path': img_rel})
+                        seen_paths.add(img_rel)
+        except Exception:
+            pass
+        # Diğer tüm ekranlardan referans verilen medyaları ekle (victory, defeat, level_*, vb.)
+        try:
+            screens = self.screen_service.list_screens(game_id)
+            for sc in screens:
+                try:
+                    if not getattr(sc, 'data_json', None):
+                        continue
+                    data = json.loads(sc.data_json)
+                    name = getattr(sc, 'name', '') or (data.get('id') or '')
+                    prefix = {
+                        'opening': 'Açılış',
+                        'victory': 'Zafer',
+                        'defeat': 'Yenilgi'
+                    }.get(name, f"Ekran: {name}")
+                    # background
+                    bg_rel = ((data.get('background') or {}).get('image')) or ''
+                    if bg_rel and bg_rel not in seen_paths:
+                        items.append({'type': 'screen', 'key': f'{name}_bg', 'label': f'{prefix}: Arkaplan', 'path': bg_rel})
+                        seen_paths.add(bg_rel)
+                    # music
+                    mus_rel = data.get('music') or ''
+                    if mus_rel and mus_rel not in seen_paths:
+                        items.append({'type': 'screen', 'key': f'{name}_music', 'label': f'{prefix}: Müzik', 'path': mus_rel})
+                        seen_paths.add(mus_rel)
+                    # widget sprite image'ları
+                    for w in (data.get('widgets') or []):
+                        if not isinstance(w, dict):
+                            continue
+                        sp = (w.get('sprite') or {})
+                        img_rel = sp.get('image')
+                        if img_rel and img_rel not in seen_paths:
+                            items.append({'type': 'screen', 'key': f'{name}_widget_sprite', 'label': f'{prefix}: Sprite Görseli', 'path': img_rel})
+                            seen_paths.add(img_rel)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        # Yalnızca bu oyunda kullanılan sprite sheet'leri topla
+        try:
+            # Oyunun seviyelerini ve ifadelerini gezerek kullanılan sprite tanımlarını bul
+            levels = self.level_service.get_levels(game_id)
+            used_sprite_ids = set()
+            for lvl in levels:
+                try:
+                    exprs = self.expression_service.get_expressions(lvl.id)
+                except Exception:
+                    exprs = []
+                for expr in exprs:
+                    try:
+                        sdef = self.sprite_service.get_sprite_definition_for_expr(expr.id)
+                    except Exception:
+                        sdef = None
+                    if sdef and getattr(sdef, 'sprite_id', None):
+                        used_sprite_ids.add(sdef.sprite_id)
+            for sid in used_sprite_ids:
+                try:
+                    s = self.sprite_service.get_sprite_sheet(sid)
+                except Exception:
+                    s = None
+                if s and s.path not in seen_paths:
+                    items.append({'type': 'sprite', 'sprite_id': s.id, 'label': f"Sprite: {s.name}", 'path': s.path})
+                    seen_paths.add(s.path)
+        except Exception:
+            # Sprite taraması başarısız olsa bile, galeri en azından ayarlardaki medyaları gösterebilsin
+            pass
         cols = 3
         row = 0
         col = 0
@@ -250,12 +401,13 @@ class DashboardFrame(ttk.Frame):
             frame = ttk.Frame(self.gallery_inner, padding=6)
             frame.grid(row=row, column=col, sticky="nw")
             path = it.get('path')
+            abs_path = self._abs_path(path) if path else None
             thumb_label = ttk.Label(frame)
             thumb_label.pack()
             img_ref = None
-            if path and os.path.isfile(path) and self._is_image(path):
+            if abs_path and os.path.isfile(abs_path) and self._is_image(abs_path):
                 try:
-                    img = Image.open(path)
+                    img = Image.open(abs_path)
                     img.thumbnail(thumb_size, Image.LANCZOS)
                     img_ref = ImageTk.PhotoImage(img)
                     thumb_label.configure(image=img_ref)
@@ -276,22 +428,38 @@ class DashboardFrame(ttk.Frame):
         ext = os.path.splitext(path.lower())[1]
         return ext in ('.png', '.jpg', '.jpeg', '.bmp', '.gif')
 
+    def _abs_path(self, maybe_rel: Optional[str]) -> Optional[str]:
+        """Convert a stored path (possibly relative like 'assets/...') to an absolute path.
+
+        Args:
+            maybe_rel: Stored path string.
+        Returns:
+            Absolute path string or None.
+        """
+        if not maybe_rel:
+            return None
+        if os.path.isabs(maybe_rel):
+            return maybe_rel
+        return os.path.join(self._project_root, maybe_rel)
+
     def _delete_media_item(self, item: Dict[str, Any]):
         try:
             if item.get('type') == 'sprite':
                 sprite_id = item.get('sprite_id')
                 self.sprite_service.delete_sprite_sheet(sprite_id)
-                if item.get('path') and os.path.isfile(item['path']):
+                abs_p = self._abs_path(item.get('path'))
+                if abs_p and os.path.isfile(abs_p):
                     try:
-                        os.remove(item['path'])
+                        os.remove(abs_p)
                     except Exception:
                         pass
             elif item.get('type') == 'setting':
                 key = item.get('key')
                 self.game_service.update_setting(self.current_game.id, key, '')
-                if item.get('path') and os.path.isfile(item['path']):
+                abs_p = self._abs_path(item.get('path'))
+                if abs_p and os.path.isfile(abs_p):
                     try:
-                        os.remove(item['path'])
+                        os.remove(abs_p)
                     except Exception:
                         pass
             else:
@@ -323,9 +491,17 @@ class MainWindow:
         self.level_service = LevelService(self.db_manager)
         self.expression_service = ExpressionService(self.db_manager)
         self.sprite_service = SpriteService(self.db_manager)
+        self.screen_service = ScreenService(self.db_manager)
         
         self.current_game_id: Optional[int] = None
         
+        # --- Top Navbar ---
+        navbar = ttk.Frame(root)
+        navbar.pack(side=tk.TOP, fill=tk.X)
+        # Place global managers on the navbar as buttons
+        ttk.Button(navbar, text="Sprite'ları Düzenle", command=self._open_sprites_manager).pack(side=tk.LEFT, padx=(10, 4), pady=6)
+        ttk.Button(navbar, text="Medya'yı Düzenle", command=self._open_media_manager).pack(side=tk.LEFT, padx=4, pady=6)
+
         # --- Layout ---
         paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
         paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -347,13 +523,28 @@ class MainWindow:
             self.game_service,
             self.level_service,
             self.expression_service,
-            self.sprite_service
+            self.sprite_service,
+            self.screen_service
         )
         paned_window.add(self.dashboard_frame, weight=4)
         
         # --- Initial Load ---
         self.games_list_frame.refresh_games()
         self.dashboard_frame.update_view()
+
+    def _open_media_manager(self) -> None:
+        """Open the standalone Media Manager window (global pool)."""
+        try:
+            MediaManagerWindow(self.root, self.game_service)
+        except Exception as e:
+            messagebox.showerror("Medya", f"Pencere açılamadı: {e}")
+
+    def _open_sprites_manager(self) -> None:
+        """Open the standalone Sprites Manager window (global pool)."""
+        try:
+            SpritesManagerWindow(self.root, self.sprite_service, self.expression_service, self.level_service, self.game_service)
+        except Exception as e:
+            messagebox.showerror("Sprite", f"Pencere açılamadı: {e}")
 
     def _on_game_selected(self, game_id: Optional[int]):
         """Handle game selection from the list."""

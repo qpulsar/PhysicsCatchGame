@@ -2,6 +2,14 @@
 
 This module provides the LevelManager class which handles level progression,
 item spawning, and level completion logic for the game.
+
+Runtime integration notes:
+- Reads per-game settings from the `game_settings` table using the runtime
+  `Database` helper (no editor dependency) to configure:
+    * default_wrong_percentage (0-100)
+    * default_item_speed (float)
+    * default_max_items (int)
+- These settings are optional; sensible defaults are used when missing.
 """
 
 import random
@@ -10,6 +18,7 @@ import sqlite3
 from typing import Dict, List, Optional, Tuple
 
 from settings import *
+from ..screens.game_screens import Database  # reuse simple runtime DB helper
 
 # This is a simplified version of the DatabaseManager from the editor
 # to avoid complex dependencies.
@@ -73,7 +82,13 @@ class LevelManager:
     ]
     
     def __init__(self):
-        """Initialize a new LevelManager with default values."""
+        """Initialize a new LevelManager with default values.
+
+        Doc:
+            - Initializes internal queues and default gameplay parameters.
+            - Item speed and other parameters may be overridden by game settings
+              when `setup_level()` is called.
+        """
         self.db = LevelDatabase()
         self.level: int = 1
         self.game_id: Optional[int] = None
@@ -88,13 +103,23 @@ class LevelManager:
         self.item_spawned_count: int = 0
         self.total_items_to_spawn: int = 0
         self.spawn_ready: bool = False
+        # Gameplay parameters (overridable via settings)
+        self.item_speed: float = 3.0
+        self.max_items_on_screen: int = 5
+        self.wrong_answer_percentage: int = 40
     
     def setup_level(self, level_number: int, game_id: int):
         """Set up a new level with the given level number.
-        
+
+        Doc:
+            - Loads level rows and expressions from the DB.
+            - Reads game-level defaults from `game_settings` and applies them to
+              internal parameters such as item speed and wrong percentage.
+
         Args:
-            level: The level number to set up.
-            
+            level_number: The level number to set up.
+            game_id: Active game id.
+
         Raises:
             KeyError: If the level number is invalid.
         """
@@ -126,22 +151,38 @@ class LevelManager:
         self.spawn_ready = False
         
         print(f"Level {level_number} for Game {game_id} setup complete. Target: {self.target_category}")
+
+        # Apply per-game settings (optional, with fallbacks)
+        try:
+            settings_map = Database().get_game_settings(game_id) or {}
+            # parse with safe fallbacks
+            self.item_speed = float(settings_map.get('default_item_speed', 3.0))
+            # Bound speed to a sane range
+            if self.item_speed <= 0:
+                self.item_speed = 3.0
+            self.max_items_on_screen = int(settings_map.get('default_max_items', 5))
+            if self.max_items_on_screen < 1:
+                self.max_items_on_screen = 5
+            self.wrong_answer_percentage = int(settings_map.get('default_wrong_percentage', 40))
+            self.wrong_answer_percentage = max(0, min(100, self.wrong_answer_percentage))
+        except Exception as _:
+            # keep defaults
+            pass
     
     def get_new_item(self) -> Tuple[str, str]:
         """Get a new item for the current level.
-        
+
+        Doc:
+            - Chooses correct vs wrong based on `wrong_answer_percentage`.
+            - Prioritizes remaining (not yet caught) correct items.
+
         Returns:
-            A tuple of (item_text, item_category) where:
-            - item_text: The text of the item
-            - item_category: The category of the item
-            
-        Note:
-            - Always prioritize spawning remaining correct items
-            - 40% chance to spawn wrong items from other levels
-            - Ensures wrong items are different from correct ones
+            tuple[str, str]: (item_text, item_category)
         """
-        # Simplified logic: 60% chance for a correct item, 40% for wrong
-        if random.random() > 0.4 and self.correct_items:
+        # Chance for correct item = 1 - wrong_percentage
+        wrong_p = max(0.0, min(1.0, (self.wrong_answer_percentage or 0) / 100.0))
+        correct_pick = random.random() > wrong_p
+        if correct_pick and self.correct_items:
             # Check for items that still need to be spawned/caught
             remaining_correct = [item for item in self.correct_items if item not in self.caught_correct]
             if remaining_correct:
@@ -159,15 +200,15 @@ class LevelManager:
     
     def prepare_spawn_events(self, min_items: int = 3, max_items: int = 6) -> None:
         """Prepare the spawn events for the current level.
-        
+
+        Doc:
+            - Ensures remaining correct items are included.
+            - Adds additional items up to a random count between given bounds.
+            - Spacing between spawns is randomized.
+
         Args:
-            min_items: Minimum number of items to spawn.
-            max_items: Maximum number of items to spawn.
-            
-        Note:
-            - Ensures all correct items are spawned before completing the level
-            - Randomly spawns wrong items from other levels
-            - Sets up spawn times with random delays between items
+            min_items: Minimum number of items to spawn additionally.
+            max_items: Maximum number of items to spawn additionally.
         """
         print("\n=== Preparing Spawn Events ===")
         print(f"Target category: {self.target_category}")

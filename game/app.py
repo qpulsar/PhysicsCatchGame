@@ -44,10 +44,12 @@ class Game:
         self.start_button_rect = None
 
         # Backgrounds (should be managed by a theme or level manager)
-        self.level_bgs = [pygame.transform.scale(pygame.image.load(os.path.join('img', 'backgrounds', f'{i}.jpg')), (SCREEN_WIDTH, SCREEN_HEIGHT)) for i in range(2,6)]
-        self.finish_bg = pygame.transform.scale(pygame.image.load(os.path.join('img', 'backgrounds', '6.jpg')), (SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.level_bgs = self._load_default_backgrounds()
+        # Finish background: fall back to first of level_bgs
+        self.finish_bg = self.level_bgs[-1] if self.level_bgs else pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 
     def run(self):
+        """Ana oyun döngüsünü çalıştırır."""
         running = True
         while running:
             running = self.handle_events()
@@ -58,7 +60,56 @@ class Game:
         pygame.quit()
         sys.exit()
 
+    def _load_default_backgrounds(self):
+        """Yoksa hata vermeyen, esnek varsayılan arkaplan yükleyici.
+
+        Öncelik sırası:
+        1) img/backgrounds/{2..5}.jpg
+        2) assets/images/ içindeki mevcut jpg/png dosyaları
+        3) Düz renk yüzeyler (ayarlanmış paletten)
+
+        Returns:
+            list[pygame.Surface]: Ekran boyutunda arkaplan yüzeyleri listesi
+        """
+        candidates = []
+        # 1) legacy backgrounds
+        for i in range(2, 6):
+            p = os.path.join('img', 'backgrounds', f'{i}.jpg')
+            if os.path.exists(p):
+                candidates.append(p)
+        # 2) assets/images altından al
+        assets_img_dir = os.path.join('assets', 'images')
+        if os.path.isdir(assets_img_dir):
+            for fn in sorted(os.listdir(assets_img_dir)):
+                if fn.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+                    candidates.append(os.path.join(assets_img_dir, fn))
+        # Görselleri yükle
+        surfaces = []
+        for path in candidates:
+            try:
+                img = pygame.image.load(path)
+                surfaces.append(pygame.transform.scale(img, (SCREEN_WIDTH, SCREEN_HEIGHT)))
+            except Exception:
+                continue
+        if surfaces:
+            return surfaces
+        # 3) Fallback plain color surfaces
+        palette = [
+            (20, 20, 30),
+            (30, 40, 60),
+            (40, 60, 90),
+            (60, 80, 110),
+        ]
+        return [self._make_color_surface(c) for c in palette]
+
+    def _make_color_surface(self, color):
+        """Belirtilen renkte ekran boyutunda yüzey üretir."""
+        surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        surf.fill(color)
+        return surf
+
     def handle_events(self):
+        """Girdi olaylarını işler ve durum geçişlerini yönetir."""
         mouse_pos = pygame.mouse.get_pos()
 
         for event in pygame.event.get():
@@ -124,6 +175,12 @@ class Game:
                 self.current_state = 'playing'
     
     def start_game(self, game_id):
+        """Seçilen oyunla oynanışı başlatır ve ayarları uygular.
+
+        - Level ayarlarını yükler ve uygular
+        - Seviye arkaplanını ve paddle görselini yükler
+        - Oyun müziğini ayarlardan ya da varsayılanlardan başlatır
+        """
         self.selected_game_id = game_id
         self.game_state.reset()
         self.level_manager.setup_level(1, game_id)
@@ -158,9 +215,50 @@ class Game:
 
         self.game_state.player = Player(self.paddle_surface)
         self.game_state.all_sprites.add(self.game_state.player)
+        self.game_state.items.add(self.game_state.player) if False else None  # no-op to keep structure
         self.current_state = 'playing'
 
+        # Start background music (settings or default)
+        try:
+            if 'settings_map' not in locals():
+                settings_map = self.db.get_game_settings(game_id)
+            music_path = settings_map.get('music_path') if settings_map else None
+            if music_path and os.path.exists(music_path):
+                chosen_music = music_path
+            else:
+                # pick first available under assets/audio or assets/midi
+                chosen_music = None
+                for base in ('assets/audio', 'assets/midi'):
+                    if os.path.isdir(base):
+                        for fn in os.listdir(base):
+                            if fn.lower().endswith(('.mp3', '.wav', '.ogg', '.mid', '.midi')):
+                                chosen_music = os.path.join(base, fn)
+                                break
+                    if chosen_music:
+                        break
+            if chosen_music:
+                try:
+                    if not pygame.mixer.get_init():
+                        pygame.mixer.init()
+                    pygame.mixer.music.load(chosen_music)
+                    pygame.mixer.music.set_volume(0.5)
+                    pygame.mixer.music.play(-1)
+                except Exception as _:
+                    pass
+        except Exception:
+            pass
+
+        # Apply settings from editor: max concurrent items, item speed
+        try:
+            max_items_on_screen = int(settings_map.get('default_max_items', 5))
+            self.level_manager.max_items_on_screen = max_items_on_screen
+            item_speed = float(settings_map.get('default_item_speed', 3.0))
+            self.level_manager.item_speed = item_speed
+        except Exception:
+            pass
+
     def update(self):
+        """Oyun durumunu günceller; oynanış harici durumlarda erken döner."""
         if self.current_state != 'playing':
             return
             
@@ -195,17 +293,36 @@ class Game:
     
     # Methods from main.py that are now part of the Game class
     def handle_item_spawning(self):
+        """Nesne doğurma akışını yönetir ve eşzamanlı nesne sınırına uyar."""
+        # Hazır event yoksa üret
         if self.level_manager.spawn_index >= len(self.level_manager.spawn_events) and not self.level_manager.is_level_complete():
+            # min/max adetleri makul tut; LevelManager içeriden kalan doğru öğeleri ekler
             self.level_manager.prepare_spawn_events(min_items=2, max_items=5)
-        
+
+        # Ekranda çok fazla nesne varsa bekle
+        try:
+            active_items = len(self.game_state.items)
+            if active_items >= max(1, int(getattr(self.level_manager, 'max_items_on_screen', 5))):
+                return
+        except Exception:
+            pass
+
         current_time = pygame.time.get_ticks()
         should_spawn, item_text, item_category = self.level_manager.should_spawn_item(current_time)
-        
+
         if should_spawn:
             self.spawn_item(item_text, item_category)
 
     def spawn_item(self, text, category):
+        """Yeni bir düşen nesne oluşturur ve hızını ayarlardan uygular."""
         item = Item(text, category)
+        # Editörden gelen hız ayarını uygula
+        try:
+            speed = float(getattr(self.level_manager, 'item_speed', 3.0))
+            if speed > 0:
+                item.speed_y = speed
+        except Exception:
+            pass
         self.game_state.all_sprites.add(item)
         self.game_state.items.add(item)
         
