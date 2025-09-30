@@ -18,6 +18,7 @@ from tkinter import ttk, filedialog, messagebox
 from typing import Dict, Optional, List
 
 from PIL import Image, ImageTk
+from ...utils import format_filetypes_for_dialog
 
 # Pygame is used only for audio preview (lazy init)
 try:
@@ -328,11 +329,14 @@ class MediaTab:
         """Open file dialog and copy selected file into assets with sanitized name."""
         t = self.type_var.get()
         if t == "images":
-            exts = [("Görseller", ".png .jpg .jpeg .bmp .gif"), ("Tümü", "*.*")]
+            exts = [("Görseller", "*.png *.jpg *.jpeg *.bmp *.gif"), ("Tüm Dosyalar", "*.*")]
         elif t == "audio":
-            exts = [("Ses", ".wav .ogg .mp3"), ("Tümü", "*.*")]
+            exts = [("Ses", "*.wav *.ogg *.mp3"), ("Tüm Dosyalar", "*.*")]
         else:
-            exts = [("MIDI", ".mid .midi"), ("Tümü", "*.*")]
+            exts = [("MIDI", "*.mid *.midi"), ("Tüm Dosyalar", "*.*")]
+        
+        # Platform-agnostic dosya türleri
+        exts = format_filetypes_for_dialog(exts)
         paths = filedialog.askopenfilenames(title="Medya Seç", filetypes=exts)
         if not paths:
             return

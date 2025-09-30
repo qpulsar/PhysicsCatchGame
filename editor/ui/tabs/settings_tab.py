@@ -7,6 +7,7 @@ import unicodedata
 from typing import Dict, Any, Optional, Callable
 
 from ...core.services import GameService
+from ...utils import format_filetypes_for_dialog
 
 
 class SettingsTab:
@@ -214,39 +215,79 @@ class SettingsTab:
             src_thumb = self.thumb_path_var.get().strip()
             if src_thumb:
                 try:
+                    # Dosya varlığını kontrol et
                     if not os.path.isfile(src_thumb):
-                        raise FileNotFoundError("Seçilen küçük resim dosyası bulunamadı.")
-                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-                    dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'thumbnails')
-                    os.makedirs(dst_dir, exist_ok=True)
-                    basename = os.path.basename(src_thumb)
-                    safe_name = self._sanitize_filename(basename)
-                    dst_path = self._avoid_collision(dst_dir, safe_name)
-                    if os.path.abspath(src_thumb) != os.path.abspath(dst_path):
-                        shutil.copy2(src_thumb, dst_path)
-                    rel_dst_path = os.path.relpath(dst_path, project_root).replace('\\', '/')
-                    self.game_service.update_setting(game_id, 'thumbnail_path', rel_dst_path)
+                        messagebox.showwarning("Uyarı", "Seçilen küçük resim dosyası bulunamadı. Ayarlar kaydedildi ancak thumbnail eklenmedi.")
+                    else:
+                        # Dosya uzantısını kontrol et
+                        valid_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.gif')
+                        if not src_thumb.lower().endswith(valid_extensions):
+                            messagebox.showwarning("Uyarı", "Geçersiz dosya formatı. Sadece PNG, JPG, JPEG, BMP veya GIF dosyaları desteklenir.")
+                        else:
+                            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+                            dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'thumbnails')
+                            
+                            # Hedef dizini oluştur
+                            try:
+                                os.makedirs(dst_dir, exist_ok=True)
+                            except OSError as dir_err:
+                                raise OSError(f"Hedef dizin oluşturulamadı: {dir_err}")
+                            
+                            basename = os.path.basename(src_thumb)
+                            safe_name = self._sanitize_filename(basename)
+                            dst_path = self._avoid_collision(dst_dir, safe_name)
+                            
+                            # Dosyayı kopyala (kaynak ve hedef aynı değilse)
+                            if os.path.abspath(src_thumb) != os.path.abspath(dst_path):
+                                try:
+                                    shutil.copy2(src_thumb, dst_path)
+                                except (IOError, OSError) as copy_err:
+                                    raise IOError(f"Dosya kopyalanamadı: {copy_err}")
+                            
+                            # Veritabanına kaydet
+                            rel_dst_path = os.path.relpath(dst_path, project_root).replace('\\', '/')
+                            self.game_service.update_setting(game_id, 'thumbnail_path', rel_dst_path)
                 except Exception as copy_err:
-                    messagebox.showwarning("Uyarı", f"Küçük resim kopyalanamadı: {copy_err}")
+                    messagebox.showwarning("Uyarı", f"Küçük resim işlenirken hata oluştu: {str(copy_err)}\nDiğer ayarlar kaydedildi.")
 
             # Handle music copy (optional)
             src_music = self.music_path_var.get().strip()
             if src_music:
                 try:
+                    # Dosya varlığını kontrol et
                     if not os.path.isfile(src_music):
-                        raise FileNotFoundError("Seçilen müzik dosyası bulunamadı.")
-                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-                    dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'audio')
-                    os.makedirs(dst_dir, exist_ok=True)
-                    basename = os.path.basename(src_music)
-                    safe_name = self._sanitize_filename(basename)
-                    dst_path = self._avoid_collision(dst_dir, safe_name)
-                    if os.path.abspath(src_music) != os.path.abspath(dst_path):
-                        shutil.copy2(src_music, dst_path)
-                    rel_dst_path = os.path.relpath(dst_path, project_root).replace('\\', '/')
-                    self.game_service.update_setting(game_id, 'music_path', rel_dst_path)
+                        messagebox.showwarning("Uyarı", "Seçilen müzik dosyası bulunamadı. Ayarlar kaydedildi ancak müzik eklenmedi.")
+                    else:
+                        # Dosya uzantısını kontrol et
+                        valid_extensions = ('.mp3', '.wav', '.ogg')
+                        if not src_music.lower().endswith(valid_extensions):
+                            messagebox.showwarning("Uyarı", "Geçersiz dosya formatı. Sadece MP3, WAV veya OGG dosyaları desteklenir.")
+                        else:
+                            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+                            dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'audio')
+                            
+                            # Hedef dizini oluştur
+                            try:
+                                os.makedirs(dst_dir, exist_ok=True)
+                            except OSError as dir_err:
+                                raise OSError(f"Hedef dizin oluşturulamadı: {dir_err}")
+                            
+                            basename = os.path.basename(src_music)
+                            safe_name = self._sanitize_filename(basename)
+                            dst_path = self._avoid_collision(dst_dir, safe_name)
+                            
+                            # Dosyayı kopyala (kaynak ve hedef aynı değilse)
+                            if os.path.abspath(src_music) != os.path.abspath(dst_path):
+                                try:
+                                    shutil.copy2(src_music, dst_path)
+                                except (IOError, OSError) as copy_err:
+                                    raise IOError(f"Dosya kopyalanamadı: {copy_err}")
+                            
+                            # Veritabanına kaydet
+                            rel_dst_path = os.path.relpath(dst_path, project_root).replace('\\', '/')
+                            self.game_service.update_setting(game_id, 'music_path', rel_dst_path)
                 except Exception as copy_err:
-                    messagebox.showwarning("Uyarı", f"Müzik kopyalanamadı: {copy_err}")
+                    messagebox.showwarning("Uyarı", f"Müzik işlenirken hata oluştu: {str(copy_err)}\nDiğer ayarlar kaydedildi.")
 
             # Save description
             new_desc = self.game_description_text.get("1.0", tk.END).strip()
@@ -260,34 +301,68 @@ class SettingsTab:
             messagebox.showerror("Hata", f"Ayarlar kaydedilirken bir hata oluştu: {str(e)}")
 
     def _browse_thumbnail(self) -> None:
-        """Open a file dialog to select a thumbnail image."""
-        file_path = filedialog.askopenfilename(
-            title="Küçük Resim Seç",
-            filetypes=[
-                ("Görüntü Dosyaları", "*.png;*.jpg;*.jpeg;*.bmp"),
+        """Thumbnail görsel dosyası seçmek için dosya diyaloğu açar."""
+        try:
+            # Platform-agnostic dosya türleri
+            filetypes = format_filetypes_for_dialog([
+                ("Görüntü Dosyaları", "*.png *.jpg *.jpeg *.bmp"),
                 ("PNG", "*.png"),
-                ("JPEG", "*.jpg;*.jpeg"),
+                ("JPEG", "*.jpg *.jpeg"),
                 ("Bitmap", "*.bmp"),
-                ("Tümü", "*.*")
-            ]
-        )
-        if file_path:
-            self.thumb_path_var.set(file_path)
+                ("Tüm Dosyalar", "*.*")
+            ])
+            
+            file_path = filedialog.askopenfilename(
+                title="Küçük Resim Seç",
+                filetypes=filetypes
+            )
+            if file_path:
+                # Dosyanın var olduğunu ve okunabilir olduğunu kontrol et
+                if not os.path.isfile(file_path):
+                    messagebox.showerror("Hata", "Seçilen dosya bulunamadı.")
+                    return
+                
+                # Dosya boyutunu kontrol et (örn. max 10MB)
+                file_size = os.path.getsize(file_path)
+                if file_size > 10 * 1024 * 1024:  # 10MB
+                    messagebox.showwarning("Uyarı", "Seçilen dosya çok büyük (max 10MB).")
+                    return
+                
+                self.thumb_path_var.set(file_path)
+        except Exception as e:
+            messagebox.showerror("Hata", f"Dosya seçilirken bir hata oluştu: {str(e)}")
 
     def _browse_music(self) -> None:
-        """Open a file dialog to select a music file."""
-        file_path = filedialog.askopenfilename(
-            title="Müzik Seç",
-            filetypes=[
-                ("Ses Dosyaları", "*.mp3;*.wav;*.ogg"),
+        """Müzik dosyası seçmek için dosya diyaloğu açar."""
+        try:
+            # Platform-agnostic dosya türleri
+            filetypes = format_filetypes_for_dialog([
+                ("Ses Dosyaları", "*.mp3 *.wav *.ogg"),
                 ("MP3", "*.mp3"),
                 ("WAV", "*.wav"),
                 ("OGG", "*.ogg"),
-                ("Tümü", "*.*")
-            ]
-        )
-        if file_path:
-            self.music_path_var.set(file_path)
+                ("Tüm Dosyalar", "*.*")
+            ])
+            
+            file_path = filedialog.askopenfilename(
+                title="Müzik Seç",
+                filetypes=filetypes
+            )
+            if file_path:
+                # Dosyanın var olduğunu ve okunabilir olduğunu kontrol et
+                if not os.path.isfile(file_path):
+                    messagebox.showerror("Hata", "Seçilen dosya bulunamadı.")
+                    return
+                
+                # Dosya boyutunu kontrol et (örn. max 50MB)
+                file_size = os.path.getsize(file_path)
+                if file_size > 50 * 1024 * 1024:  # 50MB
+                    messagebox.showwarning("Uyarı", "Seçilen dosya çok büyük (max 50MB).")
+                    return
+                
+                self.music_path_var.set(file_path)
+        except Exception as e:
+            messagebox.showerror("Hata", f"Dosya seçilirken bir hata oluştu: {str(e)}")
 
     def _sanitize_filename(self, name: str) -> str:
         """Convert filename to ASCII lowercase and replace unsafe chars with underscores."""
