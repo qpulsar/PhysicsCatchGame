@@ -1,6 +1,6 @@
 """Screen Designer Window (Toplevel) for creating DB-backed screens like the Opening screen.
 
-This designer uses a single Canvas (default 800x600) and provides a minimal, fast
+This designer uses a single Canvas (default 1024x768) and provides a minimal, fast
 UI to place widgets via drag & drop. It saves/loads a screen JSON into the DB
 using ScreenService. Heavy asset browsing is deferred to existing MediaTab and
 SpritesTab; here we focus on positions and basic properties.
@@ -39,14 +39,14 @@ class ScreenDesignerWindow(tk.Toplevel):
     Attributes:
         game_id: Aktif oyunun kimliği
         screen_service: DB CRUD için servis
-        canvas: Tasarım alanı (800x600)
+        canvas: Tasarım alanı (1024x768)
         items: Kanvas üzerindeki öğelerin dahili listesi
     """
 
-    CANVAS_W = 800
-    CANVAS_H = 600
+    CANVAS_W = 1024
+    CANVAS_H = 768
 
-    def __init__(self, parent: tk.Tk, game_id: int, screen_service, sprite_service, game_service,
+    def __init__(self, parent: tk.Tk, game_id: int, screen_service, sprite_service, game_service, level_service=None,
                  screen_name: str = "opening", screen_type: str = "menu"):
         """Designer'ı başlatır.
 
@@ -68,6 +68,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.screen_service = screen_service
         self.sprite_service = sprite_service
         self.game_service = game_service
+        self.level_service = level_service
         self.screen_name = screen_name
         self.screen_type = screen_type
 
@@ -81,6 +82,9 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.selected_item: Optional[Dict[str, Any]] = None
         self._drag_start = (0, 0)
         self._name_counters = {"label": 0, "button": 0}
+
+        # Level ekranı ise, level_id'yi UI kurulmadan ÖNCE çöz (UI bu alana bakıyor olabilir)
+        self.level_id = self._parse_level_id() if (self.screen_type or "").lower() == "level" else None
 
         self._build_ui()
         self._scan_assets()
@@ -115,6 +119,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         ttk.Label(left, text="Palet", style="Subheader.TLabel").pack(anchor="w")
         ttk.Button(left, text="Label Ekle", command=self._add_label).pack(fill="x", pady=4)
         ttk.Button(left, text="Buton Ekle", command=self._add_button).pack(fill="x", pady=4)
+        ttk.Button(left, text="Devam Butonu Ekle", command=self._add_continue_button).pack(fill="x", pady=4)
         ttk.Button(left, text="Sprite Ekle", command=self._add_image_sprite).pack(fill="x", pady=4)
         ttk.Separator(left).pack(fill="x", pady=6)
         ttk.Label(left, text="Nesneler", style="Subheader.TLabel").pack(anchor="w")
@@ -198,7 +203,13 @@ class ScreenDesignerWindow(tk.Toplevel):
         ttk.Label(self.button_frame, text="Yazı:").pack(anchor="w")
         ttk.Entry(self.button_frame, textvariable=self.button_text_var).pack(fill="x")
         ttk.Label(self.button_frame, text="Aksiyon:").pack(anchor="w", pady=(6,0))
-        ttk.Combobox(self.button_frame, textvariable=self.button_action_var, state="readonly", values=["start_game", "back"]).pack(fill="x")
+        # 'continue_level' bilgi ekranlarından seviyeye geçiş için eklenmiştir
+        ttk.Combobox(
+            self.button_frame,
+            textvariable=self.button_action_var,
+            state="readonly",
+            values=["start_game", "continue_level", "back"]
+        ).pack(fill="x")
         # Button bg color (used if no sprite image selected)
         self.button_color_var = tk.StringVar(value="#4CAF50")
         color_row = ttk.Frame(self.button_frame); color_row.pack(fill="x", pady=(6,0))
@@ -272,9 +283,15 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.button_frame.pack_forget()
         self.sprite_frame.pack_forget()
         self.level_frame.pack_forget()
-        # Level türündeyse paneli göster
+        # Level türündeyse paneli göster ve arka plan bölge seç butonunu ekle
         if (self.screen_type or "").lower() == "level":
             self.level_frame.pack(fill="x", pady=6)
+            row_pick = ttk.Frame(self.level_frame); row_pick.pack(fill="x", pady=(6,0))
+            ttk.Button(row_pick, text="Arka Plan Bölge Seç (Görsel)", command=self._open_bg_region_picker).pack(side=tk.LEFT)
+            # Seçili bölgelerin küçük önizlemeleri
+            self.level_bg_preview_frame = ttk.LabelFrame(self.level_frame, text="Seçili Arka Plan Bölgeleri")
+            self.level_bg_preview_frame.pack(fill="x", pady=(6,0))
+            self._refresh_bg_region_preview()
 
     # Palette actions
     def _on_bg_select(self) -> None:
@@ -284,6 +301,203 @@ class ScreenDesignerWindow(tk.Toplevel):
         if abs_path:
             self._apply_canvas_bg(abs_path)
             self._set_dirty(True)
+
+    def _parse_level_id(self) -> Optional[int]:
+        """Level ekranları için screen_name'den level_id çıkarır.
+
+        Beklenen biçim: "level_<id>". Uymuyorsa None döner.
+        """
+        try:
+            name = (self.screen_name or "").strip().lower()
+            if name.startswith("level_"):
+                return int(name.split("_", 1)[1])
+        except Exception:
+            return None
+        return None
+
+    def _open_bg_region_picker(self) -> None:
+        """Önceden tanımlanmış sprite region'lar arasından görsel önizlemeli çoklu seçim penceresi açar.
+
+        - Yalnızca level ekranında (ve level_id mevcutsa) çalışır.
+        - Seçimler veritabanında `level_background_regions` eşlemesine kaydedilir.
+        """
+        if not self.level_service or not self.sprite_service:
+            messagebox.showwarning("Sprite", "Sprite/Seviye servisi hazır değil.")
+            return
+        if not self.level_id:
+            messagebox.showwarning("Seviye", "Bu işlem sadece seviye ekranında yapılabilir.")
+            return
+
+        # Mevcut seçimleri al
+        selected_ids: List[int] = []
+        try:
+            selected_ids = self.level_service.get_level_background_region_ids(self.level_id)  # type: ignore[attr-defined]
+        except Exception:
+            selected_ids = []
+
+        # Region listesini al
+        regions = []
+        try:
+            regions = self.sprite_service.list_sprite_regions()
+        except Exception as e:
+            messagebox.showerror("Sprite Bölgeleri", f"Bölgeler alınamadı: {e}")
+            return
+
+        # Dialog
+        dlg = tk.Toplevel(self)
+        dlg.title("Arka Plan Bölge Seçimi")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.geometry("720x520")
+
+        container = ttk.Frame(dlg)
+        container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Scrollable canvas
+        canvas = tk.Canvas(container, borderwidth=0)
+        vsb = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        frame = ttk.Frame(canvas)
+        frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=frame, anchor="nw")
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+
+        thumbs: List[ImageTk.PhotoImage] = []  # referansları tut
+        var_by_id: Dict[int, tk.BooleanVar] = {}
+
+        def abs_project(rel: str) -> Optional[str]:
+            """Proje köküne göre relatif yolu mutlak yapar."""
+            if not rel:
+                return None
+            p = rel.replace('\\','/').strip()
+            if os.path.isabs(p):
+                return p
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            return os.path.join(project_root, p)
+
+        # Grid halinde küçük thumbs + checkbox
+        cols = 4
+        for idx, reg in enumerate(regions):
+            try:
+                rid = int(reg.get("id"))
+                img_rel = str(reg.get("image_path") or "")
+                name = str(reg.get("name") or "")
+                x = int(reg.get("x", 0)); y = int(reg.get("y", 0))
+                w = int(reg.get("width", 0)); h = int(reg.get("height", 0))
+                abs_path = abs_project(img_rel)
+                thumb = None
+                if abs_path and os.path.isfile(abs_path) and w > 0 and h > 0:
+                    try:
+                        pil = Image.open(abs_path)
+                        iw, ih = pil.size
+                        # Kutu sınırlarını görüntü içine kırp
+                        x1 = max(0, min(iw, x)); y1 = max(0, min(ih, y))
+                        x2 = max(0, min(iw, x + w)); y2 = max(0, min(ih, y + h))
+                        if x2 > x1 and y2 > y1:
+                            pil_crop = pil.crop((x1, y1, x2, y2))
+                            tw, th = 160, 120
+                            # oranı koru
+                            scale = min(tw / max(1, pil_crop.width), th / max(1, pil_crop.height))
+                            rz = (max(1, int(pil_crop.width * scale)), max(1, int(pil_crop.height * scale)))
+                            pil_thumb = pil_crop.resize(rz, Image.LANCZOS)
+                            thumb = ImageTk.PhotoImage(pil_thumb)
+                            thumbs.append(thumb)
+                    except Exception:
+                        thumb = None
+                cell = ttk.Frame(frame, padding=6)
+                r = idx // cols; c = idx % cols
+                cell.grid(row=r, column=c, sticky="nsew")
+                if thumb:
+                    tk.Label(cell, image=thumb).pack()
+                tk.Label(cell, text=f"{name}\n{img_rel}", justify="center").pack(pady=(4,0))
+                var = tk.BooleanVar(value=(rid in selected_ids))
+                var_by_id[rid] = var
+                ttk.Checkbutton(cell, text="Seç", variable=var).pack(pady=(2,0))
+            except Exception:
+                continue
+
+        # Actions
+        action = ttk.Frame(dlg); action.pack(fill="x", pady=(8,0))
+        def on_ok():
+            try:
+                chosen = [rid for rid, v in var_by_id.items() if v.get()]
+                self.level_service.set_level_background_region_ids(self.level_id, chosen)  # type: ignore[attr-defined]
+                messagebox.showinfo("Kaydedildi", "Arka plan bölgeleri kaydedildi.", parent=dlg)
+                # Sağ panelde küçük önizlemeyi yenile
+                self._refresh_bg_region_preview()
+                dlg.destroy()
+            except Exception as e:
+                messagebox.showerror("Hata", f"Kaydedilemedi: {e}", parent=dlg)
+        ttk.Button(action, text="Kaydet", command=on_ok).pack(side=tk.RIGHT, padx=6)
+        ttk.Button(action, text="İptal", command=dlg.destroy).pack(side=tk.RIGHT)
+
+    def _refresh_bg_region_preview(self) -> None:
+        """Seçili arka plan bölge ID'lerine göre küçük önizlemeleri listeler."""
+        # Panel yoksa veya level değilse atla
+        if not hasattr(self, 'level_bg_preview_frame'):
+            return
+        for w in self.level_bg_preview_frame.winfo_children():
+            w.destroy()
+        level_id = getattr(self, 'level_id', None)
+        if not self.level_service or not self.sprite_service or not level_id:
+            ttk.Label(self.level_bg_preview_frame, text="Seçim yok.").pack(anchor="w")
+            return
+        try:
+            selected = set(self.level_service.get_level_background_region_ids(level_id))
+            if not selected:
+                ttk.Label(self.level_bg_preview_frame, text="Seçim yok.").pack(anchor="w")
+                return
+            regions = self.sprite_service.list_sprite_regions()
+            show = [r for r in regions if int(r.get('id', 0)) in selected]
+        except Exception:
+            ttk.Label(self.level_bg_preview_frame, text="Seçimler yüklenemedi.").pack(anchor="w")
+            return
+
+        wrap = ttk.Frame(self.level_bg_preview_frame); wrap.pack(fill="x")
+        # referansları sakla
+        self._bg_prev_refs: List[ImageTk.PhotoImage] = []
+
+        def abs_project(rel: str) -> Optional[str]:
+            if not rel:
+                return None
+            p = rel.replace('\\','/').strip()
+            if os.path.isabs(p):
+                return p
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            return os.path.join(project_root, p)
+
+        row = ttk.Frame(wrap); row.pack(fill="x")
+        for reg in show:
+            try:
+                img_rel = str(reg.get("image_path") or "")
+                name = str(reg.get("name") or "")
+                x = int(reg.get("x", 0)); y = int(reg.get("y", 0))
+                w = int(reg.get("width", 0)); h = int(reg.get("height", 0))
+                abs_path = abs_project(img_rel)
+                thumb = None
+                if abs_path and os.path.isfile(abs_path) and w > 0 and h > 0:
+                    pil = Image.open(abs_path)
+                    iw, ih = pil.size
+                    x1 = max(0, min(iw, x)); y1 = max(0, min(ih, y))
+                    x2 = max(0, min(iw, x + w)); y2 = max(0, min(ih, y + h))
+                    if x2 > x1 and y2 > y1:
+                        pil_crop = pil.crop((x1, y1, x2, y2))
+                        # küçük önizleme 64x48
+                        tw, th = 64, 48
+                        scale = min(tw / max(1, pil_crop.width), th / max(1, pil_crop.height))
+                        rz = (max(1, int(pil_crop.width * scale)), max(1, int(pil_crop.height * scale)))
+                        pil_thumb = pil_crop.resize(rz, Image.LANCZOS)
+                        thumb = ImageTk.PhotoImage(pil_thumb)
+                        self._bg_prev_refs.append(thumb)
+                cell = ttk.Frame(row, padding=(4,2)); cell.pack(side=tk.LEFT)
+                if thumb:
+                    tk.Label(cell, image=thumb).pack()
+                ttk.Label(cell, text=name).pack()
+            except Exception:
+                continue
 
     def _ensure_canvas(self) -> bool:
         """Canvas'ın var olduğunu garantiler."""
@@ -511,6 +725,28 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.items.append(item)
         self._select_item(item)
         # Insert into tree and select
+        try:
+            self.obj_tree.insert("", tk.END, iid=str(rect), values=(f"{name} (button)",))
+            self.obj_tree.selection_set(str(rect))
+        except Exception:
+            pass
+        try:
+            self.canvas.tag_lower("__bg__")
+        except Exception:
+            pass
+
+    def _add_continue_button(self) -> None:
+        """Kanvas üzerine 'Devam' yazılı ve 'continue_level' aksiyonlu bir buton ekler."""
+        if not self._ensure_canvas():
+            return
+        x, y, w, h = 320, 360, 180, 48
+        cx, cy, cw, ch = int(self._to_canvas(x)), int(self._to_canvas(y)), int(self._to_canvas(w)), int(self._to_canvas(h))
+        rect = self.canvas.create_rectangle(cx, cy, cx+cw, cy+ch, fill="#4CAF50", outline="", tags=("button",))
+        label = self.canvas.create_text(cx+cw/2, cy+ch/2, text="Devam", fill="#FFFFFF", font=("Segoe UI", 18), anchor="center", tags=("button",))
+        name = self._gen_name("button")
+        item = {"id": rect, "type": "button", "props": {"name": name, "text": "Devam", "action": "continue_level", "w": w, "h": h, "x": x, "y": y, "label_id": label}}
+        self.items.append(item)
+        self._select_item(item)
         try:
             self.obj_tree.insert("", tk.END, iid=str(rect), values=(f"{name} (button)",))
             self.obj_tree.selection_set(str(rect))

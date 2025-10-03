@@ -1,10 +1,14 @@
-"""Levels tab for the game editor, redesigned for better UX, combining Levels and Expressions."""
+"""Levels tab for the game editor, redesigned for better UX, combining Levels and Expressions.
+
+Yeni: Seviye başına düşen ifadeler için kullanılacak sprite seçim alanı eklendi.
+"""
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
+import json
 
 from ...core.models import Level, Expression
-from ...core.services import GameService, LevelService, ExpressionService
+from ...core.services import GameService, LevelService, ExpressionService, SpriteService
 
 # Copied from the old expressions_tab.py
 class AddExpressionDialog(tk.Toplevel):
@@ -208,11 +212,13 @@ class AddLevelDialog(tk.Toplevel):
 class LevelsTab:
     """Combined tab for managing Levels and their Expressions."""
 
-    def __init__(self, parent, game_service: GameService, level_service: LevelService, expression_service: ExpressionService):
+    def __init__(self, parent, game_service: GameService, level_service: LevelService, expression_service: ExpressionService, sprite_service: SpriteService):
         self.parent = parent
         self.game_service = game_service
         self.level_service = level_service
         self.expression_service = expression_service
+        # Sprite servis referansı (seviye bazında çoklu seçim için kullanılır)
+        self.sprite_service = sprite_service
         
         # State for levels
         self._level_edit_item = None
@@ -286,6 +292,8 @@ class LevelsTab:
         
         self.level_delete_button = ttk.Button(self.level_button_frame, text="Sil", command=self._delete_level, state="disabled")
         self.level_delete_button.pack(side=tk.LEFT, padx=2)
+
+        # Not: Sprite seçimleri Screen Designer üzerinden yapılır (görsel seçim)
 
     # --- EXPRESSION MANAGEMENT ---
 
@@ -492,6 +500,8 @@ class LevelsTab:
     def _on_level_double_click(self, event):
         """Double-click on a level row will open the edit dialog."""
         self._start_level_edit()
+
+    # Not: Sprite seçimleri LevelsTab üzerinden kaldırıldı. Ekran Tasarımcısı'ndan yönetilir.
 
     def _add_expression(self):
         level_id = self._get_selected_level_id()

@@ -136,6 +136,30 @@ class DatabaseManager:
             UNIQUE (image_path, name)
         )''')
         
+        # Map levels to selected sprite REGIONS for background of falling expressions
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS level_background_regions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            level_id INTEGER NOT NULL,
+            region_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (level_id) REFERENCES levels (id) ON DELETE CASCADE,
+            FOREIGN KEY (region_id) REFERENCES sprite_regions (id) ON DELETE CASCADE,
+            UNIQUE (level_id, region_id)
+        )''')
+
+        # Create level_background_sprites table to map levels to background sprites (many-to-many)
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS level_background_sprites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            level_id INTEGER NOT NULL,
+            sprite_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (level_id) REFERENCES levels (id) ON DELETE CASCADE,
+            FOREIGN KEY (sprite_id) REFERENCES sprites (id) ON DELETE CASCADE,
+            UNIQUE (level_id, sprite_id)
+        )''')
+        
         # Create screens table to store screen layouts as JSON per game
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS screens (
@@ -244,6 +268,61 @@ class DatabaseManager:
             cursor.execute('DELETE FROM levels WHERE id = ?', (level_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    # Level background sprite mappings
+    def get_level_background_sprite_ids(self, level_id: int) -> List[int]:
+        """Belirtilen seviye için ilişkilendirilmiş arka plan sprite ID'lerini döndürür."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT sprite_id FROM level_background_sprites WHERE level_id = ? ORDER BY sprite_id', (level_id,))
+            return [int(row[0]) for row in cursor.fetchall()]
+
+    def set_level_background_sprite_ids(self, level_id: int, sprite_ids: List[int]) -> None:
+        """Belirtilen seviye için arka plan sprite ID'lerini atomik olarak günceller.
+
+        Varolan eşleştirmeler silinir ve verilen liste eklenir.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Sil mevcutlar
+            cursor.execute('DELETE FROM level_background_sprites WHERE level_id = ?', (level_id,))
+            # Ekle yeni kayıtlar
+            if sprite_ids:
+                cursor.executemany(
+                    'INSERT OR IGNORE INTO level_background_sprites (level_id, sprite_id) VALUES (?, ?)',
+                    [(level_id, int(sid)) for sid in sprite_ids]
+                )
+            conn.commit()
+
+    # --- Level background sprite REGION mappings ---
+    def get_level_background_region_ids(self, level_id: int) -> List[int]:
+        """Belirtilen seviye için seçili sprite bölge (region) ID'lerini döndürür.
+
+        Bu seçimler, yukarıdan düşen nesnelerin ARKA PLAN görselleri için kullanılır.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT region_id FROM level_background_regions WHERE level_id = ? ORDER BY region_id',
+                (level_id,)
+            )
+            return [int(row[0]) for row in cursor.fetchall()]
+
+    def set_level_background_region_ids(self, level_id: int, region_ids: List[int]) -> None:
+        """Belirtilen seviye için sprite bölge (region) seçimlerini atomik olarak günceller.
+
+        Mevcut seçimler silinir ve yeni liste eklenir. Bu seçimler, yukarıdan düşen
+        ifadelerin arka planı olarak kullanılmak içindir.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM level_background_regions WHERE level_id = ?', (level_id,))
+            if region_ids:
+                cursor.executemany(
+                    'INSERT OR IGNORE INTO level_background_regions (level_id, region_id) VALUES (?, ?)',
+                    [(level_id, int(rid)) for rid in region_ids]
+                )
+            conn.commit()
     
     # Expression operations
     def get_expressions(self, level_id: int) -> List[sqlite3.Row]:

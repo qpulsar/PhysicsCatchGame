@@ -4,6 +4,8 @@ from tkinter import ttk, messagebox
 from typing import Optional, Dict, Any
 import os
 import json
+import sys
+import subprocess
 from PIL import Image, ImageTk
 
 from ..core.models import Game
@@ -233,7 +235,7 @@ class DashboardFrame(ttk.Frame):
         if self.current_game:
             # Levels tab
             try:
-                self.tabs['levels'] = LevelsTab(self.notebook, self.game_service, self.level_service, self.expression_service)
+                self.tabs['levels'] = LevelsTab(self.notebook, self.game_service, self.level_service, self.expression_service, self.sprite_service)
                 self.notebook.add(self.tabs['levels'].frame, text="Seviyeler")
             except Exception as e:
                 messagebox.showerror("Sekme Hatası", f"Seviyeler sekmesi yüklenemedi: {e}")
@@ -501,6 +503,7 @@ class MainWindow:
         # Place global managers on the navbar as buttons
         ttk.Button(navbar, text="Sprite'ları Düzenle", command=self._open_sprites_manager).pack(side=tk.LEFT, padx=(10, 4), pady=6)
         ttk.Button(navbar, text="Medya'yı Düzenle", command=self._open_media_manager).pack(side=tk.LEFT, padx=4, pady=6)
+        ttk.Button(navbar, text="Oyun Oyna", command=self._play_selected_game).pack(side=tk.RIGHT, padx=10, pady=6)
 
         # --- Layout ---
         paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
@@ -545,6 +548,28 @@ class MainWindow:
             SpritesManagerWindow(self.root, self.sprite_service, self.expression_service, self.level_service, self.game_service)
         except Exception as e:
             messagebox.showerror("Sprite", f"Pencere açılamadı: {e}")
+
+    def _play_selected_game(self) -> None:
+        """Seçili oyunu pygame penceresinde başlatır.
+
+        Not:
+        - Oyun, `main.py` komutu ile yeni bir süreçte çalıştırılır.
+        - Argüman olarak `--game-id` ve `--from-editor` gönderilir.
+        - Editörde tasarlanan açılış ekranı (opening) oyun başlarken gösterilir.
+        """
+        if not self.current_game_id:
+            messagebox.showwarning("Oyun Seçilmedi", "Lütfen listeden bir oyun seçin.")
+            return
+        try:
+            # main.py yolunu güvenle oluştur
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            main_path = os.path.join(project_root, "main.py")
+            if not os.path.isfile(main_path):
+                raise FileNotFoundError(f"main.py bulunamadı: {main_path}")
+            # Mevcut Python yorumlayıcısıyla oyunu başlat
+            subprocess.Popen([sys.executable, main_path, "--game-id", str(self.current_game_id), "--from-editor"], cwd=project_root)
+        except Exception as e:
+            messagebox.showerror("Oyun", f"Oyun başlatılamadı: {e}")
 
     def _on_game_selected(self, game_id: Optional[int]):
         """Handle game selection from the list."""

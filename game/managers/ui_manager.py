@@ -42,6 +42,8 @@ class UIManager:
         # UI elements
         self.help_button_img: Optional[Surface] = None
         self.help_menu_bg: Optional[Surface] = None
+        # Help menu anchor position: 'top-right' | 'top-left'
+        self.help_area: str = 'top-right'
         self._load_ui_elements()
     
     def _load_ui_elements(self) -> None:
@@ -72,6 +74,20 @@ class UIManager:
         except (pygame.error, FileNotFoundError) as e:
             print(f"Error loading help menu background: {e}")
             self.help_menu_bg = None
+
+    def set_help_button(self, image_path: str | None) -> None:
+        """Set custom help button sprite from path.
+
+        If path is invalid, silently ignore and keep previous image.
+        """
+        if not image_path:
+            return
+        try:
+            if os.path.exists(image_path):
+                img = pygame.image.load(image_path).convert_alpha()
+                self.help_button_img = pygame.transform.scale(img, (40, 40))
+        except Exception:
+            pass
     
     def draw_text(
         self,
@@ -216,9 +232,14 @@ class UIManager:
         menu_width = min(max_width, settings.SCREEN_WIDTH - 40)  # Ensure it fits on screen
         menu_height = 60 + (len(remaining_items) * item_height)
         
-        # Position the menu (top-right corner with padding)
-        menu_x = settings.SCREEN_WIDTH - menu_width - padding
-        menu_y = 60  # Below the HUD
+        # Position the menu based on configured anchor
+        if (self.help_area or '').lower() == 'top-left':
+            menu_x = padding
+            menu_y = 60  # Below the HUD
+        else:
+            # default top-right
+            menu_x = settings.SCREEN_WIDTH - menu_width - padding
+            menu_y = 60
         
         # Create menu rectangle
         menu_rect = pygame.Rect(menu_x, menu_y, menu_width, menu_height)

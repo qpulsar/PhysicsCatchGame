@@ -173,6 +173,29 @@ class LevelService:
         """Delete a level by ID."""
         return self.db.delete_level(level_id)
 
+    def get_level_background_sprite_ids(self, level_id: int) -> List[int]:
+        """Belirtilen seviye için arka plan sprite ID'lerini döndürür.
+
+        Bu metod, seviye ekranında yukarıdan düşen ifadeler için kullanılacak
+        arka plan sprite'larını yönetmek amacıyla kullanılır.
+        """
+        return self.db.get_level_background_sprite_ids(level_id)
+
+    def set_level_background_sprite_ids(self, level_id: int, sprite_ids: List[int]) -> None:
+        """Belirtilen seviye için arka plan sprite ID'lerini atomik olarak günceller.
+
+        Var olan eşleştirmeler silinir ve verilen liste eklenir.
+        """
+        self.db.set_level_background_sprite_ids(level_id, sprite_ids)
+
+    def get_level_background_region_ids(self, level_id: int) -> List[int]:
+        """Belirtilen seviye için seçili sprite bölge (region) ID'lerini döndürür."""
+        return self.db.get_level_background_region_ids(level_id)
+
+    def set_level_background_region_ids(self, level_id: int, region_ids: List[int]) -> None:
+        """Belirtilen seviye için sprite bölge (region) seçimlerini atomik olarak günceller."""
+        self.db.set_level_background_region_ids(level_id, region_ids)
+
 
 class ExpressionService:
     """Service for expression-related operations."""

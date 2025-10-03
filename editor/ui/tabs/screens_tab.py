@@ -84,7 +84,10 @@ class ScreensTab:
                 ttk.Label(self._levels_container, text=f"Seviye #{lvl.order if hasattr(lvl, 'order') else lvl.id}").grid(row=row, column=0, sticky="w", padx=(0,8), pady=3)
                 name = getattr(lvl, 'name', None) or f"Level {getattr(lvl, 'order', lvl.id)}"
                 ttk.Label(self._levels_container, text=name).grid(row=row, column=1, sticky="w")
+                # Ana seviye ekranı düzenleme butonu
                 ttk.Button(self._levels_container, text="Düzenle", command=lambda lid=lvl.id: self._edit_level(lid)).grid(row=row, column=2, sticky="e")
+                # Seviye öncesi bilgi ekranı düzenleme butonu
+                ttk.Button(self._levels_container, text="Bilgi Ekranı", command=lambda lid=lvl.id: self._edit_level_info(lid)).grid(row=row, column=3, sticky="e", padx=(6,0))
         except Exception as e:
             messagebox.showerror("Ekranlar", f"Seviyeler yüklenemedi: {e}")
 
@@ -109,6 +112,14 @@ class ScreensTab:
         """
         self._open_designer(screen_name=f"level_{level_id}", screen_type="level")
 
+    def _edit_level_info(self, level_id: int) -> None:
+        """Belirtilen seviye için BİLGİ ekranı tasarımcısını açar.
+
+        Bilgi ekranı screen_name: "level_<id>_info", screen_type: "info"
+        Bu ekran, seviyeye başlamadan önce gösterilecek açıklama/ipuçları için tasarlanır.
+        """
+        self._open_designer(screen_name=f"level_{level_id}_info", screen_type="info")
+
     # Helpers
     def _open_designer(self, screen_name: str, screen_type: str) -> None:
         """Genel amaçlı tasarımcı penceresini açar."""
@@ -118,7 +129,7 @@ class ScreensTab:
             if not game_id:
                 messagebox.showwarning("Ekranlar", "Lütfen önce bir oyun seçin.")
                 return
-            ScreenDesignerWindow(root, game_id, self.screen_service, self.sprite_service, self.game_service,
+            ScreenDesignerWindow(root, game_id, self.screen_service, self.sprite_service, self.game_service, self.level_service,
                                  screen_name=screen_name, screen_type=screen_type)
         except Exception as e:
             messagebox.showerror("Ekranlar", f"Pencere açılamadı: {e}")

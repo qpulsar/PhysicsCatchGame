@@ -4,9 +4,17 @@ import os
 
 SPRITE_SHEET_PATH = os.path.join('img', 'buttons.png')
 
-# Sprite sheet'in 10 butonunu döndürür (2 sütun x 5 satır, kullanıcı koordinatlarıyla)
 def load_buttons_from_sheet():
-    sheet = Image.open(SPRITE_SHEET_PATH).convert('RGBA')
+    """Sprite sheet'ten 10 adet buton döndürür (2 sütun x 5 satır).
+
+    Dosya bulunamazsa boş liste döndürür; böylece çağıran kod fallback'e geçebilir.
+    """
+    if not os.path.exists(SPRITE_SHEET_PATH):
+        return []
+    try:
+        sheet = Image.open(SPRITE_SHEET_PATH).convert('RGBA')
+    except Exception:
+        return []
     # Koordinatlar: (left, upper, right, lower)
     coords = [
         (0, 0, 220, 56),       # sol üst

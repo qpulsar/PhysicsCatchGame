@@ -1,12 +1,11 @@
 """Media management tab for shared game assets.
 
-This tab allows managing shared media assets (images, audio, midi) stored under the
-root-level `assets/` directory, NOT per-game. It provides:
+This tab works over the root-level `assets/` directory (not per-game) and provides:
 - Uploading media with slugified filenames
 - Image preview
 - Audio play/stop for supported formats
 - Description field (per-game usage) stored in `assets/metadata.json`
-- Image preparation tools: scale to 800x600, scale by percentage
+- Image preparation tools: scale to 1024x768, scale by percentage
 """
 from __future__ import annotations
 
@@ -195,7 +194,7 @@ class MediaTab:
         tools = ttk.LabelFrame(right, text="Görsel Hazırlama Araçları", padding=8)
         tools.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
-        ttk.Button(tools, text="800x600'e Ölçekle (kopya)", command=self._scale_800_600).pack(side=tk.LEFT, padx=4)
+        ttk.Button(tools, text="1024x768'e Ölçekle (kopya)", command=self._scale_1024_768).pack(side=tk.LEFT, padx=4)
         ttk.Label(tools, text="%").pack(side=tk.LEFT)
         self.scale_percent_var = tk.StringVar(value="50")
         ttk.Entry(tools, textvariable=self.scale_percent_var, width=5).pack(side=tk.LEFT, padx=2)
@@ -459,9 +458,9 @@ class MediaTab:
         if desc:
             self.desc_text.insert("1.0", desc)
 
-    def _scale_800_600(self) -> None:
-        """Scale selected image to 800x600 and save as copy (suffix _800x600)."""
-        self._scale_image_to_fixed((800, 600), suffix="_800x600")
+    def _scale_1024_768(self) -> None:
+        """Scale selected image to 1024x768 and save as copy (suffix _1024x768)."""
+        self._scale_image_to_fixed((1024, 768), suffix="_1024x768")
 
     def _scale_percent(self) -> None:
         """Scale selected image by percentage from input and save as copy."""

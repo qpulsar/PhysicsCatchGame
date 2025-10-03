@@ -1,4 +1,5 @@
 import pygame
+import json
 from settings import *
 from ..core.utils import draw_text
 import random
@@ -114,13 +115,51 @@ class Database:
             print(f"Database error: {e}")
             return None
 
+    def get_levels(self, game_id: int) -> list[dict]:
+        """Get levels for a given game as list of dicts sorted by level_number."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, level_number, level_name FROM levels WHERE game_id = ? ORDER BY level_number', (game_id,))
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Database error: {e}")
+            return []
+
+    def get_screen(self, game_id: int, name: str) -> dict | None:
+        """Fetch a designed screen JSON for given game and name.
+
+        Doc:
+            - Reads from `screens` table created by the editor.
+            - Returns parsed `data_json` as dict, or None if not found/invalid.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('SELECT data_json FROM screens WHERE game_id = ? AND name = ?', (game_id, name))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                try:
+                    return json.loads(row['data_json']) if row['data_json'] else None
+                except Exception:
+                    return None
+        except sqlite3.Error as e:
+            print(f"Database error: {e}")
+            return None
+
 class Carousel:
     """Manages the game selection carousel."""
     def __init__(self, games: list, font: pygame.font.Font):
         self.games = games
         self.font = font
         self.selected_index = 0
-        self.card_spacing = CARD_WIDTH + CARD_GAP
+        # Thumbnail boyutlarını sabitle: 150x150
+        self.card_w = 150
+        self.card_h = 150
+        self.card_spacing = self.card_w + CARD_GAP
         self.cards = self._create_cards()
         self.target_x = SCREEN_WIDTH / 2
         self.current_x = self.target_x
@@ -135,6 +174,8 @@ class Carousel:
         self.drag_start_x = 0
         self.drag_start_offset = 0
         self.card_rects = []
+        # Last selected rect (for external layout binding)
+        self.selected_rect: pygame.Rect | None = None
 
     def _create_cards(self) -> list[pygame.Surface]:
         """Create surfaces (cards) for each game with vibrant backgrounds."""
@@ -148,7 +189,7 @@ class Carousel:
             except Exception:
                 assets_thumb = None
             thumbnail_path = assets_thumb if assets_thumb and os.path.exists(assets_thumb) else f"img/thumbnails/{game.id}.png"
-            card_surface = pygame.Surface((CARD_WIDTH, CARD_HEIGHT), pygame.SRCALPHA)
+            card_surface = pygame.Surface((self.card_w, self.card_h), pygame.SRCALPHA)
 
             # Canlı arka planı her zaman çiz
             base_color = CARD_PALETTE[idx % len(CARD_PALETTE)] if 'CARD_PALETTE' in globals() else CARD_COLOR
@@ -158,14 +199,14 @@ class Carousel:
             try:
                 if os.path.exists(thumbnail_path):
                     img = pygame.image.load(thumbnail_path).convert_alpha()
-                    img = pygame.transform.scale(img, (CARD_WIDTH - 20, CARD_HEIGHT - 20))
+                    img = pygame.transform.scale(img, (self.card_w - 20, self.card_h - 20))
                     img_rect = img.get_rect()
                     img_rect.topleft = (10, 10)
                     card_surface.blit(img, img_rect)
                 else:
                     raise FileNotFoundError
             except (pygame.error, FileNotFoundError):
-                draw_text(card_surface, game.name, 32, CARD_WIDTH / 2, CARD_HEIGHT / 2, WHITE, wrap_width=CARD_WIDTH - 20)
+                draw_text(card_surface, game.name, 22, self.card_w / 2, self.card_h / 2, WHITE, wrap_width=self.card_w - 24)
 
             cards.append(card_surface)
         return cards
@@ -193,8 +234,8 @@ class Carousel:
                 self.card_rects.append((pygame.Rect(0,0,0,0), i)) # Add placeholder for correct indexing
                 continue
 
-            scaled_card = pygame.transform.smoothscale(card, (int(CARD_WIDTH * scale), int(CARD_HEIGHT * scale)))
-            rect = scaled_card.get_rect(center=(center_x, SCREEN_HEIGHT / 2))
+            scaled_card = pygame.transform.smoothscale(card, (int(self.card_w * scale), int(self.card_h * scale)))
+            rect = scaled_card.get_rect(center=(center_x, int(SCREEN_HEIGHT * 0.42)))
             
             # Store rect with its index
             self.card_rects.append((rect, i))
@@ -206,6 +247,8 @@ class Carousel:
                 shadow = pygame.Surface((outline_rect.width, outline_rect.height), pygame.SRCALPHA)
                 pygame.draw.rect(shadow, (0,0,0,80), shadow.get_rect(), border_radius=18)
                 surface.blit(shadow, outline_rect.topleft)
+                # Expose selected rect
+                self.selected_rect = rect.copy()
 
             surface.blit(scaled_card, rect)
         
@@ -278,6 +321,36 @@ class Carousel:
 
         return None
 
+def _draw_quadratic_curve(surface: pygame.Surface, p0, p1, p2, color, width=2, steps=40):
+    """Approximate a quadratic Bezier with line segments and draw it.
+
+    Uses aalines when available for smoothing; falls back to regular lines.
+    """
+    pts = []
+    for i in range(steps + 1):
+        t = i / steps
+        x = (1-t)*(1-t)*p0[0] + 2*(1-t)*t*p1[0] + t*t*p2[0]
+        y = (1-t)*(1-t)*p0[1] + 2*(1-t)*t*p1[1] + t*t*p2[1]
+        pts.append((int(x), int(y)))
+    try:
+        pygame.draw.aalines(surface, color, False, pts)
+    except Exception:
+        pass
+    # Draw a slightly thicker line to make it visible on any background
+    pygame.draw.lines(surface, color, False, pts, width)
+
+def _curve_intersects_any(p0, p1, p2, rects: list[pygame.Rect], steps=24) -> bool:
+    """Roughly test if quadratic curve passes through any rect by sampling points."""
+    for i in range(steps + 1):
+        t = i / steps
+        x = (1-t)*(1-t)*p0[0] + 2*(1-t)*t*p1[0] + t*t*p2[0]
+        y = (1-t)*(1-t)*p0[1] + 2*(1-t)*t*p1[1] + t*t*p2[1]
+        pt = (int(x), int(y))
+        for r in rects:
+            if r.collidepoint(pt):
+                return True
+    return False
+
 def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
     """Draws the game selection carousel and handles the 'no games' state."""
     screen.fill(CAROUSEL_BG_COLOR)
@@ -285,9 +358,85 @@ def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
     mesh_bg.draw(screen)
     
     if carousel:
-        draw_text(screen, "Bir Oyun Seç", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 6, TEXT_COLOR)
+        draw_text(screen, "Bir Oyun Seç", 56, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.14, TEXT_COLOR)
         carousel.update()
         carousel.draw(screen)
+        # Seçili oyunun seviyelerini yatay mindmap gibi listele ve kart ile spline bağla
+        try:
+            selected_game = carousel.games[carousel.selected_index] if carousel.games else None
+            if selected_game:
+                levels = Database().get_levels(getattr(selected_game, 'id', 0))
+                sel_rect = getattr(carousel, 'selected_rect', None)
+                # Anchor: kartın sağ-orta kenarı; yoksa ekran ortası
+                if sel_rect:
+                    anchor_x = sel_rect.right
+                    # Çoklu anchor: seçili kartın üst ve alt kenarlarına eşit aralıklı dağıt
+                    x_start = anchor_x + 36
+                else:
+                    anchor_x = SCREEN_WIDTH // 2
+                    anchor_y = int(SCREEN_HEIGHT * 0.46)
+                    x_start = anchor_x + 36
+                # Yatay dağılım: soldan sağa eşit aralıklı
+                L = min(12, len(levels))
+                if L > 0:
+                    available_w = max(200, SCREEN_WIDTH - x_start - 48)
+                    step_x = max(140, available_w // (L + 1))
+                    base_y = anchor_y if not sel_rect else (sel_rect.top + sel_rect.height // 2)  # simetri
+                    # Alternatif dikey offset dizisi: +/- artan genlik
+                    offsets = []
+                    amp_seq = [32, 56, 80, 104, 128, 152]
+                    i = 0
+                    while len(offsets) < L:
+                        amp = amp_seq[min(i//2, len(amp_seq)-1)]
+                        offsets.append((-amp) if i % 2 == 0 else (+amp))
+                        i += 1
+                    # Anchor noktaları: üst ve alt kenar boyunca eşit aralıklı X'ler
+                    if sel_rect:
+                        m = 12
+                        avail_w = max(20, sel_rect.width - 2*m)
+                        step_ax = avail_w / max(2, (L + 1))
+                        top_points = [(int(sel_rect.left + m + (k+1)*step_ax), sel_rect.top) for k in range(L)]
+                        bot_points = [(int(sel_rect.left + m + (k+1)*step_ax), sel_rect.bottom) for k in range(L)]
+                        # L eleman için sırayla üst-alt seç
+                        anchors = [top_points[i] if i % 2 == 0 else bot_points[i] for i in range(L)]
+                    else:
+                        anchors = [(anchor_x, base_y) for _ in range(L)]
+                    # Çarpışmadan kaçınmak için yan thumbnail dikdörtgenlerini topla
+                    avoid_rects: list[pygame.Rect] = []
+                    try:
+                        for r, idx in getattr(carousel, 'card_rects', []):
+                            if not isinstance(r, pygame.Rect):
+                                continue
+                            if sel_rect and r.colliderect(sel_rect):
+                                continue
+                            # Biraz şişir (tam temas olmasın)
+                            avoid_rects.append(r.inflate(8, 8))
+                    except Exception:
+                        avoid_rects = []
+                    # Düğümleri çiz
+                    for idx in range(L):
+                        lv = levels[idx]
+                        x = x_start + (idx + 1) * step_x
+                        y = base_y + offsets[idx]
+                        # Level numarasını gösterme; yalnızca isim
+                        label = f"{lv.get('level_name')}"
+                        # Bağlantı eğrisi: anchor -> kontrol -> (x-14,y)
+                        end_pt = (x - 18, y)
+                        a_x, a_y = anchors[idx]
+                        ctrl = [int((a_x + end_pt[0]) / 2), int((a_y + y) / 2) + (12 if offsets[idx] >= 0 else -12)]
+                        # Yan thumbnail'lere değmeyi önlemek için kontrol noktasını ayarla
+                        tries = 0
+                        while _curve_intersects_any((a_x, a_y), tuple(ctrl), end_pt, avoid_rects) and tries < 8:
+                            ctrl[1] += 32 if offsets[idx] >= 0 else -32
+                            tries += 1
+                        # Anchor noktasına küçük düğüm çiz
+                        pygame.draw.circle(screen, TEXT_COLOR, (a_x, a_y), 3)
+                        _draw_quadratic_curve(screen, (a_x, a_y), tuple(ctrl), end_pt, TEXT_COLOR, width=3, steps=40)
+                        pygame.draw.circle(screen, TEXT_COLOR, end_pt, 3)
+                        # Metni hafif sola hizalı çiz; daha geniş wrap
+                        draw_text(screen, label, 24, x + 6, y, TEXT_COLOR, wrap_width=220)
+        except Exception:
+            pass
     else:
         draw_text(screen, "Oyun Bulunamadı", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, TEXT_COLOR)
         draw_text(screen, "Lütfen editör programını kullanarak bir oyun oluşturun.", 28, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, TEXT_COLOR)
