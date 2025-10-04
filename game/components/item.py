@@ -88,21 +88,34 @@ class Item(pygame.sprite.Sprite):
             return False
     
     def _add_text_to_image(self):
-        """Add text to the item's image"""
+        """Metni item görseline ekler; genişlik taşarsa fontu dinamik küçültür."""
         try:
-            # Calculate text color based on background brightness
+            # Arkaplan parlaklığına göre metin rengi
             avg_color = pygame.transform.average_color(self.image)
             brightness = (avg_color[0]*0.299 + avg_color[1]*0.587 + avg_color[2]*0.114)
             text_color = BLACK if brightness > 186 else WHITE
-            
-            # Create text surface
-            font = get_font(20)
-            text_surface = font.render(self.text, True, text_color)
+
+            # Metni görsel içine sığdırmak için font boyutunu ayarla
+            max_w = int(self.image.get_width() * 0.9)  # %90 genişlik içinde kalsın
+            max_h = int(self.image.get_height() * 0.8) # yükseklikte de pay bırak
+            size = 22
+            text_surface = None
+            while size >= 10:
+                font = get_font(size)
+                surf = font.render(self.text, True, text_color)
+                if surf.get_width() <= max_w and surf.get_height() <= max_h:
+                    text_surface = surf
+                    break
+                size -= 2
+            if text_surface is None:
+                # Son çare: en küçük boy
+                font = get_font(10)
+                text_surface = font.render(self.text, True, text_color)
+
+            # Ortala ve çiz
             text_rect = text_surface.get_rect(center=(self.image.get_width() // 2, self.image.get_height() // 2))
-            
-            # Blit text onto the image
             self.image.blit(text_surface, text_rect)
-            
+
         except Exception as e:
             print(f"Error adding text to item: {e}")
     

@@ -162,10 +162,9 @@ class Database:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''
-                    SELECT sr.x, sr.y, sr.width, sr.height, s.path AS sheet_path
+                    SELECT sr.x, sr.y, sr.width, sr.height, sr.image_path AS sheet_path
                     FROM level_background_regions lbr
                     JOIN sprite_regions sr ON sr.id = lbr.region_id
-                    JOIN sprites s ON s.id = sr.sprite_id
                     WHERE lbr.level_id = ?
                     ORDER BY lbr.id
                     ''',
@@ -175,6 +174,35 @@ class Database:
         except sqlite3.Error as e:
             print(f"Database error: {e}")
             return []
+
+    def get_sprite_region(self, region_key: str) -> dict | None:
+        """'name — image_path' anahtarına göre sprite bölgesini döndürür.
+        sprite_regions şeması: (image_path, name, x, y, width, height)
+        """
+        if not region_key or ' — ' not in region_key:
+            return None
+        
+        name, image_path = region_key.split(' — ', 1)
+        image_path = image_path.strip()
+        name = name.strip()
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''
+                    SELECT x, y, width, height, image_path AS sheet_path
+                    FROM sprite_regions
+                    WHERE name = ? AND image_path = ?
+                    ''',
+                    (name, image_path)
+                )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except sqlite3.Error as e:
+            print(f"Database error in get_sprite_region: {e}")
+            return None
 
 class Carousel:
     """Manages the game selection carousel."""

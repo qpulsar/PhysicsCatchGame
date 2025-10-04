@@ -471,78 +471,63 @@ class Game:
         except Exception:
             pass
 
-        # Load paddle (basket) from settings
+        # Load paddle (basket) from the level's screen design
         self.paddle_surface = None
+        basket_length = 128 # Default length
         try:
-            settings_map = settings_map if 'settings_map' in locals() else self.db.get_game_settings(game_id)
-            # 1) Basket length (apply before creating Player)
-            try:
-                length_keys = [
-                    f"level_{self.level_manager.level}_basket_length",
-                    "basket_length",
-                    "Sepet Uzunluğu",
-                    "paddle_length",
-                ]
-                for k in length_keys:
-                    if k in settings_map and str(settings_map.get(k)).strip():
-                        settings.PLAYER_WIDTH = int(float(settings_map.get(k)))
-                        print(f"[SpriteDBG] paddle length from settings: {k}={settings_map.get(k)}")
-                        break
-            except Exception:
-                pass
+            level_screen_name = f"level_{self.level_manager.level}"
+            print(f"[BASKET_DEBUG] Trying to load screen: {level_screen_name}")
+            screen_data = self.db.get_screen(game_id, level_screen_name)
+            
+            if not screen_data:
+                level_id = self._resolve_level_id(game_id, self.level_manager.level)
+                print(f"[BASKET_DEBUG] Fallback to level_id: {level_id}")
+                if level_id:
+                    level_screen_name = f"level_{level_id}"
+                    print(f"[BASKET_DEBUG] Trying to load screen with ID: {level_screen_name}")
+                    screen_data = self.db.get_screen(game_id, level_screen_name)
 
-            # 2) Basket sprite as simple path
-            path_keys = [
-                f"level_{self.level_manager.level}_basket_sprite_path",
-                "basket_sprite_path",
-                "basket_sprite",
-                "Sepet Sprite",
-                "paddle_sprite",
-            ]
-            sprite_path = None
-            for k in path_keys:
-                val = settings_map.get(k)
-                if isinstance(val, str) and val.strip():
-                    sprite_path = val.strip()
-                    break
-            if sprite_path:
-                abs_path = sprite_path if os.path.exists(sprite_path) else (self._abs_project_path(sprite_path) or None)
-                if abs_path and os.path.exists(abs_path):
-                    try:
-                        self.paddle_surface = pygame.image.load(abs_path).convert_alpha()
-                        print(f"[SpriteDBG] paddle sprite (path) applied: {abs_path}")
-                    except Exception:
-                        self.paddle_surface = None
-                else:
-                    print(f"[SpriteDBG] paddle sprite (path) not found: {sprite_path}")
+            if screen_data and 'level_settings' in screen_data:
+                print("[BASKET_DEBUG] Screen data and level_settings found.")
+                level_settings = screen_data['level_settings']
+                basket_sprite_key = level_settings.get('basket_sprite')
+                basket_length = int(level_settings.get('basket_length', 128))
+                print(f"[BASKET_DEBUG] Basket Sprite Key: {basket_sprite_key}, Length: {basket_length}")
 
-            # 3) Basket sprite as region JSON (legacy/editor format)
-            if self.paddle_surface is None:
-                paddle_key = f"level_{self.level_manager.level}_paddle_sprite"
-                data = settings_map.get(paddle_key)
-                if data:
-                    import json
-                    try:
-                        info = json.loads(data)
-                    except Exception:
-                        info = None
-                    if info:
-                        sheet_path = self.db.get_sprite_path(int(info.get('sprite_id', 0)))
-                        if sheet_path and os.path.exists(sheet_path):
-                            sheet_img = pygame.image.load(sheet_path).convert_alpha()
-                            rect = pygame.Rect(int(info['x']), int(info['y']), int(info['width']), int(info['height']))
-                            self.paddle_surface = sheet_img.subsurface(rect).copy()
-                            print("[SpriteDBG] paddle sprite (region) applied")
+                if basket_sprite_key:
+                    region_info = self.db.get_sprite_region(basket_sprite_key)
+                    print(f"[BASKET_DEBUG] DB region_info: {region_info}")
+                    if region_info:
+                        sheet_path_abs = self._abs_project_path(region_info['sheet_path'])
+                        print(f"[BASKET_DEBUG] Absolute sheet path: {sheet_path_abs}")
+                        if sheet_path_abs:
+                            sheet_img = pygame.image.load(sheet_path_abs).convert_alpha()
+                            region_rect = pygame.Rect(region_info['x'], region_info['y'], region_info['width'], region_info['height'])
+                            self.paddle_surface = sheet_img.subsurface(region_rect).copy()
+                            print(f"[BASKET_DEBUG] SUCCESS: Basket sprite loaded from region: {basket_sprite_key}")
                         else:
-                            print(f"[SpriteDBG] paddle sprite (region) sheet not found: {sheet_path}")
-        except Exception:
-            self.paddle_surface = None
+                            print(f"[BASKET_DEBUG] ERROR: Basket sheet not found at path: {region_info['sheet_path']}")
+                    else:
+                        print(f"[BASKET_DEBUG] ERROR: Basket sprite region not found in DB for key: {basket_sprite_key}")
+                else:
+                    print("[BASKET_DEBUG] WARNING: basket_sprite key not found in level_settings.")
+            else:
+                print("[BASKET_DEBUG] ERROR: screen_data or level_settings not found.")
+        except Exception as e:
+            print(f"[BASKET_DEBUG] CRITICAL ERROR loading basket: {e}")
 
-        self.game_state.player = Player(self.paddle_surface)
-        if self.paddle_surface is None:
+        # Create the player sprite
+        if self.paddle_surface:
+            self.game_state.player = Player(image=self.paddle_surface, length=basket_length)
+        else:
+            # Fallback to a default rectangle if no sprite is found
             print("[SpriteDBG] paddle fallback: rectangle (no sprite)")
+            fallback_surface = pygame.Surface((basket_length, 30))
+            fallback_surface.fill(ORANGE)
+            self.game_state.player = Player(image=fallback_surface, length=basket_length)
+        
         self.game_state.all_sprites.add(self.game_state.player)
-        self.game_state.items.add(self.game_state.player) if False else None  # no-op to keep structure
+
         self.current_state = 'playing'
 
         # Start background music (settings or default)
@@ -722,18 +707,23 @@ class Game:
             pass
         # Paddle sprite from settings (Sepet Sprite / paddle_sprite / basket_sprite)
         try:
-            paddle_path = settings_map.get('Sepet Sprite') or settings_map.get('paddle_sprite') or settings_map.get('basket_sprite')
-            if paddle_path and os.path.exists(paddle_path):
-                img = pygame.image.load(paddle_path).convert_alpha()
-                self.paddle_surface = img
-                print(f"[SpriteDBG] paddle sprite applied: {paddle_path}")
-            elif paddle_path:
-                # Göreli yolu proje köküne göre dene
-                path2 = self._abs_project_path(paddle_path)
-                if path2 and os.path.exists(path2):
-                    img = pygame.image.load(path2).convert_alpha()
+            paddle_path_raw = settings_map.get('Sepet Sprite') or settings_map.get('paddle_sprite') or settings_map.get('basket_sprite')
+            if paddle_path_raw and isinstance(paddle_path_raw, str):
+                # Editör formatı: "mor — assets/images/buttons.png"
+                if ' — ' in paddle_path_raw:
+                    paddle_path = paddle_path_raw.split(' — ', 1)[-1].strip()
+                else:
+                    paddle_path = paddle_path_raw
+
+                path_abs = self._abs_project_path(paddle_path)
+                if path_abs and os.path.exists(path_abs):
+                    img = pygame.image.load(path_abs).convert_alpha()
                     self.paddle_surface = img
-                    print(f"[SpriteDBG] paddle sprite applied (abs): {path2}")
+                    print(f"[SpriteDBG] paddle sprite from overlay settings applied: {path_abs}")
+                elif os.path.exists(paddle_path):
+                    img = pygame.image.load(paddle_path).convert_alpha()
+                    self.paddle_surface = img
+                    print(f"[SpriteDBG] paddle sprite from overlay settings applied: {paddle_path}")
         except Exception:
             pass
         # Music override from overlay
@@ -810,23 +800,62 @@ class Game:
             self.item_base_surfaces = []
             lvl_num = self.level_manager.level
             lvl_id = self._resolve_level_id(game_id, lvl_num)
-            if lvl_id:
-                regions = self.db.get_level_background_regions(lvl_id)
-                print(f"[SpriteDBG] item regions found: {len(regions)} for level_id={lvl_id}")
+
+            def _load_item_surfaces_for_level(level_id: int) -> int:
+                regions = self.db.get_level_background_regions(level_id)
+                print(f"[SpriteDBG] item regions found: {len(regions)} for level_id={level_id}")
                 for r in regions:
-                    sheet = r.get('sheet_path')
+                    sheet_rel = r.get('sheet_path')
                     x, y, w, h = int(r.get('x', 0)), int(r.get('y', 0)), int(r.get('width', 0)), int(r.get('height', 0))
                     try:
-                        if sheet and os.path.exists(sheet) and w > 0 and h > 0:
-                            img = pygame.image.load(sheet).convert_alpha()
-                            rect = pygame.Rect(x, y, w, h)
-                            rect = rect.clip(pygame.Rect(0, 0, img.get_width(), img.get_height()))
-                            sub = img.subsurface(rect).copy()
-                            self.item_base_surfaces.append(sub)
-                    except Exception:
+                        # Resolve absolute path for relative asset paths
+                        sheet_abs = self._abs_project_path(sheet_rel) or (sheet_rel if sheet_rel and os.path.exists(sheet_rel) else None)
+                        if not sheet_abs:
+                            print(f"[SpriteDBG] item sheet not found: rel={sheet_rel}")
+                            continue
+                        if w <= 0 or h <= 0:
+                            print(f"[SpriteDBG] invalid region size: w={w}, h={h}")
+                            continue
+                        img = pygame.image.load(sheet_abs).convert_alpha()
+                        rect = pygame.Rect(x, y, w, h)
+                        rect = rect.clip(pygame.Rect(0, 0, img.get_width(), img.get_height()))
+                        if rect.width <= 0 or rect.height <= 0:
+                            print(f"[SpriteDBG] clipped rect empty for region: {x},{y},{w},{h} on {sheet_abs}")
+                            continue
+                        sub = img.subsurface(rect).copy()
+                        self.item_base_surfaces.append(sub)
+                    except Exception as e:
+                        print(f"[SpriteDBG] failed to build item surface: {e}")
                         continue
-                print(f"[SpriteDBG] item base surfaces ready: {len(self.item_base_surfaces)}")
-        except Exception:
+                return len(self.item_base_surfaces)
+
+            if lvl_id:
+                count = _load_item_surfaces_for_level(lvl_id)
+                # Eğer mevcut level'da yoksa, oyun içi deneyim için diğer level'lara bak
+                if count == 0:
+                    print("[SpriteDBG] no item regions for current level; searching other levels with regions...")
+                    try:
+                        levels = self.db.get_levels(game_id)
+                        for row in levels:
+                            other_id = int(row.get('id'))
+                            if other_id == lvl_id:
+                                continue
+                            # Geçici listeyi temizlemeden deneyelim; sadece ilk bulunanı kullan
+                            prev_len = len(self.item_base_surfaces)
+                            found = _load_item_surfaces_for_level(other_id)
+                            if found > prev_len:
+                                # Bu level'ı aktif yap (numarasına geç)
+                                try:
+                                    self.level_manager.setup_level(int(row.get('level_number', 1)), game_id)
+                                    print(f"[SpriteDBG] switched to level_number={row.get('level_number')} having item regions")
+                                except Exception:
+                                    pass
+                                break
+                    except Exception:
+                        pass
+            print(f"[SpriteDBG] item base surfaces ready: {len(self.item_base_surfaces)}")
+        except Exception as e:
+            print(f"[SpriteDBG] preparing item base surfaces failed: {e}")
             self.item_base_surfaces = []
 
     def _prepare_level_info_widgets(self):

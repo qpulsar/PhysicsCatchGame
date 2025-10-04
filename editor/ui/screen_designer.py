@@ -81,7 +81,19 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.items: List[Dict[str, Any]] = []  # [{'id':canvas_id, 'type':'label'|'button'|'image', 'props':{...}}]
         self.selected_item: Optional[Dict[str, Any]] = None
         self._drag_start = (0, 0)
-        self._name_counters = {"label": 0, "button": 0}
+        self._name_counters = {"label": 0, "button": 0, "sprite": 0}
+
+        # Sepet önizlemesi için referanslar
+        self._basket_preview_img_ref: Optional[ImageTk.PhotoImage] = None
+        self._basket_preview_id: Optional[int] = None
+
+        # Düşen item arkaplan önizlemesi için referanslar
+        self._item_preview_img_ref: Optional[ImageTk.PhotoImage] = None
+        self._item_preview_id: Optional[int] = None
+        self._item_preview_text_id: Optional[int] = None
+        # Çoklu önizleme için dinamik düğümler ve referans listesi
+        self._item_preview_nodes: list[tuple[int, int]] = []  # (img_id, text_id)
+        self._item_preview_img_refs: list[ImageTk.PhotoImage] = []
 
         # Level ekranı ise, level_id'yi UI kurulmadan ÖNCE çöz (UI bu alana bakıyor olabilir)
         self.level_id = self._parse_level_id() if (self.screen_type or "").lower() == "level" else None
@@ -111,6 +123,32 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.canvas.bind("<Button-1>", self._on_canvas_click)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
+
+        # Sepet önizlemesi için canvas'ta bir yer tutucu oluştur
+        self._basket_preview_id = self.canvas.create_image(
+            self.CANVAS_W / 2, self.CANVAS_H - 40,  # Alt-orta
+            anchor="s",
+            state="hidden",
+            tags=("__basket_preview__",)
+        )
+
+        # Düşen item arkaplanı için bir önizleme yer tutucu (üst-orta)
+        self._item_preview_id = self.canvas.create_image(
+            self.CANVAS_W / 2, 90,
+            anchor="n",
+            state="hidden",
+            tags=("__item_bg_preview__",)
+        )
+        # Üzerine metin yer tutucu
+        self._item_preview_text_id = self.canvas.create_text(
+            self.CANVAS_W / 2, 90,
+            text="",
+            fill="#FFFFFF",
+            font=("Segoe UI", 24),
+            anchor="n",
+            state="hidden",
+            tags=("__item_bg_preview_text__",)
+        )
 
         # Left palette
         left = ttk.Frame(self, padding=8)
@@ -249,9 +287,12 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.level_basket_sprite_var = tk.StringVar()
         self.level_basket_sprite_combo = ttk.Combobox(lf_row1, textvariable=self.level_basket_sprite_var, state="readonly")
         self.level_basket_sprite_combo.pack(side=tk.LEFT, expand=True, fill="x", padx=(4,0))
+        self.level_basket_sprite_combo.bind("<<ComboboxSelected>>", lambda e: self._update_basket_preview())
+
         lf_row1b = ttk.Frame(self.level_frame); lf_row1b.pack(fill="x", pady=(2,0))
         ttk.Label(lf_row1b, text="Sepet Uzunluğu:").pack(side=tk.LEFT)
         self.level_basket_len_var = tk.StringVar(value="128")
+        self.level_basket_len_var.trace_add('write', lambda *args: self._update_basket_preview())
         ttk.Entry(lf_row1b, textvariable=self.level_basket_len_var, width=8).pack(side=tk.LEFT, padx=(4,0))
         # Ses efektleri
         lf_row2 = ttk.Frame(self.level_frame); lf_row2.pack(fill="x", pady=(6,0))
@@ -428,6 +469,8 @@ class ScreenDesignerWindow(tk.Toplevel):
                 messagebox.showinfo("Kaydedildi", "Arka plan bölgeleri kaydedildi.", parent=dlg)
                 # Sağ panelde küçük önizlemeyi yenile
                 self._refresh_bg_region_preview()
+                # Kanvasta düşen item arkaplan önizlemesini güncelle
+                self._update_item_bg_preview()
                 dlg.destroy()
             except Exception as e:
                 messagebox.showerror("Hata", f"Kaydedilemedi: {e}", parent=dlg)
@@ -499,6 +542,115 @@ class ScreenDesignerWindow(tk.Toplevel):
             except Exception:
                 continue
 
+        # Kanvasta büyük önizlemeyi güncelle
+        try:
+            self._update_item_bg_preview()
+        except Exception:
+            pass
+
+    def _update_item_bg_preview(self) -> None:
+        """Seçili arka plan sprite bölgesinden birini kanvasta örnek metinle ölçekleyerek gösterir.
+
+        - Text sığacak şekilde arkaplan ölçeklenir (oran korunur).
+        - Örnek metin, seçili fontla (Segoe UI, 24) görüntülenir.
+        """
+        if not self._ensure_canvas() or not hasattr(self, '_item_preview_id'):
+            return
+        # Sadece level ekranında çalış
+        if (self.screen_type or "").lower() != "level" or not self.level_service or not self.level_id:
+            try:
+                self.canvas.itemconfigure(self._item_preview_id, state="hidden")
+                self.canvas.itemconfigure(self._item_preview_text_id, state="hidden")
+            except Exception:
+                pass
+            return
+
+        # Önce önceki dinamik önizlemeleri temizle
+        try:
+            for img_id, txt_id in self._item_preview_nodes:
+                try:
+                    self.canvas.delete(img_id)
+                except Exception:
+                    pass
+                try:
+                    self.canvas.delete(txt_id)
+                except Exception:
+                    pass
+        finally:
+            self._item_preview_nodes = []
+            self._item_preview_img_refs = []
+
+        # Eski tekil yer tutucuları gizle
+        try:
+            self.canvas.itemconfigure(self._item_preview_id, state="hidden")
+            self.canvas.itemconfigure(self._item_preview_text_id, state="hidden")
+        except Exception:
+            pass
+
+        # Seçili tüm region'ları örnekle
+        try:
+            selected_ids = self.level_service.get_level_background_region_ids(self.level_id)  # type: ignore[attr-defined]
+        except Exception:
+            selected_ids = []
+        if not selected_ids:
+            return
+
+        # Region detaylarını al
+        try:
+            regions = self.sprite_service.list_sprite_regions()
+            region_list = [r for r in regions if int(r.get('id', -1)) in set(int(x) for x in selected_ids)]
+        except Exception:
+            region_list = []
+        if not region_list:
+            return
+
+        # Örnek metin ve yazı tipi
+        import tkinter.font as tkfont
+        sample_text = "12 N"
+        font = tkfont.Font(family="Segoe UI", size=24)
+        text_w = max(1, font.measure(sample_text))
+        text_h = max(1, font.metrics("linespace"))
+        pad_x, pad_y = 16, 10
+
+        # Her region için scaled görsel boyutunu hesapla ve toplam genişliği bul
+        previews: list[tuple[int,int,ImageTk.PhotoImage]] = []  # (w,h,photo)
+        spacing = 16
+        for reg in region_list:
+            entry = {
+                'image': reg.get('image_path'),
+                'name': reg.get('name'),
+                'x': reg.get('x'), 'y': reg.get('y'),
+                'width': reg.get('width'), 'height': reg.get('height')
+            }
+            pil_crop = self._load_crop_image(entry)
+            if pil_crop is None:
+                continue
+            bg_w, bg_h = max(1, pil_crop.width), max(1, pil_crop.height)
+            target_w = text_w + pad_x * 2
+            target_h = text_h + pad_y * 2
+            scale = max(target_w / bg_w, target_h / bg_h)
+            new_w = max(1, int(bg_w * scale * self.zoom))
+            new_h = max(1, int(bg_h * scale * self.zoom))
+            pil_scaled = pil_crop.resize((new_w, new_h), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(pil_scaled)
+            previews.append((new_w, new_h, photo))
+        if not previews:
+            return
+
+        total_w = sum(w for w,_,_ in previews) + spacing * (len(previews) - 1)
+        cx_center = int(self._to_canvas(self.CANVAS_W / 2))
+        top_y = int(self._to_canvas(90))
+        start_x = cx_center - total_w // 2
+
+        # Çiz ve referansları sakla
+        cur_x = start_x
+        for new_w, new_h, photo in previews:
+            img_id = self.canvas.create_image(cur_x, top_y, anchor="nw", image=photo, tags=("__item_bg_preview__",))
+            txt_id = self.canvas.create_text(cur_x + new_w/2, top_y + new_h/2, text=sample_text, fill="#FFFFFF", font=("Segoe UI", 24), anchor="center", tags=("__item_bg_preview_text__",))
+            self._item_preview_nodes.append((img_id, txt_id))
+            self._item_preview_img_refs.append(photo)
+            cur_x += new_w + spacing
+
     def _ensure_canvas(self) -> bool:
         """Canvas'ın var olduğunu garantiler."""
         return hasattr(self, "canvas") and self.canvas is not None
@@ -547,6 +699,8 @@ class ScreenDesignerWindow(tk.Toplevel):
             self._apply_canvas_bg(self._canvas_bg_path)
         # Öğeleri yeniden konumlandır/ölçekle
         self._reflow_items()
+        # Zoom değişiminde de item bg önizlemesini tazele
+        self._update_item_bg_preview()
 
     # Asset scanning
     def _scan_assets(self) -> None:
@@ -1208,6 +1362,9 @@ class ScreenDesignerWindow(tk.Toplevel):
                             self.level_hud_sprite_var.set(lv.get("hud_sprite"))
                         if lv.get("help_area"):
                             self.level_help_area_var.set(str(lv.get("help_area")))
+                    # Mevcut veriyi yükledikten sonra önizlemeleri göster
+                    self.after(100, self._update_basket_preview)  # UI'nin çizilmesini bekle
+                    self.after(120, self._update_item_bg_preview)
             except Exception:
                 pass
             # widgets
@@ -1349,6 +1506,59 @@ class ScreenDesignerWindow(tk.Toplevel):
             x1, y1 = self.canvas.coords(it["id"])  # (x,y)
             it["props"]["x"], it["props"]["y"] = float(self._to_logical(x1)), float(self._to_logical(y1))
         self._refresh_position_fields()
+
+    def _update_basket_preview(self) -> None:
+        """Seçili sepet sprite'ını ve uzunluğunu kullanarak kanvasta bir önizleme çizer."""
+        if not self._ensure_canvas() or not hasattr(self, '_basket_preview_id'):
+            return
+
+        key = self.level_basket_sprite_var.get().strip()
+        if not key or " — " not in key:
+            self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
+            return
+
+        try:
+            basket_len = int(self.level_basket_len_var.get())
+            if basket_len <= 0:
+                self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
+                return
+        except (ValueError, TypeError):
+            self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
+            return
+
+        name, image_rel = key.split(" — ", 1)
+        entry = self._find_sprite_region(image_rel, name)
+        if not entry:
+            self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
+            return
+
+        pil_crop = self._load_crop_image(entry)
+        if not pil_crop:
+            self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
+            return
+
+        try:
+            # Görüntüyü en/boy oranını koruyarak yeniden boyutlandır
+            w, h = pil_crop.size
+            aspect_ratio = h / w if w > 0 else 1
+            new_w = int(self._to_canvas(basket_len))
+            new_h = int(new_w * aspect_ratio)
+
+            if new_w < 1 or new_h < 1:
+                self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
+                return
+
+            img_resized = pil_crop.resize((new_w, new_h), Image.LANCZOS)
+            self._basket_preview_img_ref = ImageTk.PhotoImage(img_resized)
+
+            # Kanvas öğesini güncelle
+            self.canvas.itemconfigure(self._basket_preview_id, image=self._basket_preview_img_ref, state="normal")
+            self.canvas.tag_raise(self._basket_preview_id) # Diğer her şeyin üzerinde olsun
+
+        except Exception as e:
+            print(f"Error updating basket preview: {e}")
+            self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
+
 
     # ------- Tree/Z helpers -------
     def _populate_tree(self) -> None:
