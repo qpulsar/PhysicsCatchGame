@@ -25,11 +25,11 @@ def get_font(size=20):
 class Item(pygame.sprite.Sprite):
     _button_sprites = None
     
-    def __init__(self, text, item_type):
+    def __init__(self, text, item_type, base_surface: pygame.Surface | None = None):
         super().__init__()
         self.text = str(text)
         self.item_type = str(item_type)
-        self._create_image()
+        self._create_image(base_surface)
         
         # Set initial position (random x, just above the screen)
         self.rect = self.image.get_rect()
@@ -39,9 +39,18 @@ class Item(pygame.sprite.Sprite):
         # Movement properties
         self.speed_y = 3
     
-    def _create_image(self):
+    def _create_image(self, base_surface: pygame.Surface | None = None):
         """Create the item's image with sprite or fallback to simple shape"""
-        # Try to use sprites if available
+        # 1) Dışarıdan verilen base_surface öncelikli
+        if base_surface is not None:
+            try:
+                print("[SpriteDBG] item: using provided base_surface")
+                self.image = pygame.transform.smoothscale(base_surface, (ITEM_WIDTH, ITEM_HEIGHT)).convert_alpha()
+                self._add_text_to_image()
+                return
+            except Exception:
+                pass
+        # 2) Ortak sprite sheet (opsiyonel)
         if SPRITE_UTILS_AVAILABLE and self._try_load_sprite():
             return
             
@@ -58,8 +67,13 @@ class Item(pygame.sprite.Sprite):
                     print("Warning: No sprites loaded from sprite sheet")
                     return False
             
+            # Liste boş ise seçim yapma
+            if not Item._button_sprites:
+                return False
+
             # Choose a random button sprite
             base_button = random.choice(Item._button_sprites)
+            print("[SpriteDBG] item: using sheet button sprite")
             
             # Scale the sprite to match item dimensions while maintaining aspect ratio
             self.image = pygame.transform.smoothscale(base_button, (ITEM_WIDTH, ITEM_HEIGHT)).convert_alpha()

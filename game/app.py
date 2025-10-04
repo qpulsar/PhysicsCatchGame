@@ -44,6 +44,8 @@ class Game:
         # Opening screen state (from editor)
         self.opening_data = None
         self.opening_buttons = []
+        # Düşen nesneler için sprite yüzeyleri (level_background_regions tabanlı)
+        self.item_base_surfaces: list[pygame.Surface] = []
 
         # Game Selection Screen
         self.mesh_bg = MeshBackground(SCREEN_WIDTH, SCREEN_HEIGHT, particle_color=LIGHT_GRAY, line_color=TEAL)
@@ -169,6 +171,41 @@ class Game:
         surf.fill(color)
         return surf
 
+    def _abs_project_path(self, rel: str) -> str | None:
+        """Proje köküne göre göreli yolu mutlak hale getirir.
+
+        Screen Designer göreli yolları (assets/...) kaydeder. Çalışma dizini
+        farklı olduğunda dosya bulunamayabilir; bu yardımcı, oyunun konumuna göre
+        kökten çözer.
+        """
+        try:
+            if not rel:
+                return None
+            p = rel.replace('\\', '/').strip()
+            if os.path.isabs(p):
+                return p if os.path.exists(p) else None
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            cand = os.path.join(project_root, p)
+            return cand if os.path.exists(cand) else None
+        except Exception:
+            return None
+
+    def _resolve_level_id(self, game_id: int, level_number: int) -> int | None:
+        """Verilen oyun ve seviye numarası için DB'deki seviye ID'sini döndürür.
+
+        Editor, ekranları genellikle `level_<id>` adıyla kaydediyor. Oyun tarafında
+        numaradan ID'ye köprü kurmak için bu yardımcıyı kullanıyoruz.
+        """
+        try:
+            levels = self.db.get_levels(game_id)
+            for row in levels:
+                # row bir dict: {'id': ..., 'level_number': ..., 'level_name': ...}
+                if int(row.get('level_number', 0)) == int(level_number):
+                    return int(row.get('id'))
+        except Exception:
+            return None
+        return None
+
     def handle_events(self):
         """Girdi olaylarını işler ve durum geçişlerini yönetir."""
         mouse_pos = pygame.mouse.get_pos()
@@ -236,8 +273,23 @@ class Game:
                     act = b.get('action')
                     if act in ('start_game', 'continue'):
                         # opening sonrası akış: level info varsa gösterilecek, yoksa oynanış
+                        # Screen Designer bazı kurulumlarda seviye ekranlarını level_<DB id> adıyla kaydediyor.
+                        # Oyunda hem numaraya hem de DB id'ye göre isimleri deneyelim.
                         try:
-                            info = self.db.get_screen(self.selected_game_id, 'level_1_info')
+                            info = None
+                            lvl_num = 1
+                            lvl_id = self._resolve_level_id(self.selected_game_id, lvl_num)
+                            candidates = [
+                                f"level_{lvl_num}_info",
+                                f"level_{lvl_id}_info" if lvl_id else None,
+                            ]
+                            # info ekran adayları (log: ekran teşhisi)
+                            print(f"[SpriteDBG] level_info candidates (opening click): {list(filter(None, candidates))}")
+                            for name in filter(None, candidates):
+                                info = self.db.get_screen(self.selected_game_id, name)
+                                if info and isinstance(info, dict):
+                                    print(f"[SpriteDBG] level_info selected: {name}")
+                                    break
                         except Exception:
                             info = None
                         if info and isinstance(info, dict):
@@ -347,7 +399,19 @@ class Game:
             return
         # Bilgi ekranını kontrol et
         try:
-            info = self.db.get_screen(game_id, 'level_1_info')
+            info = None
+            lvl_num = 1
+            lvl_id = self._resolve_level_id(game_id, lvl_num)
+            candidates = [
+                f"level_{lvl_num}_info",
+                f"level_{lvl_id}_info" if lvl_id else None,
+            ]
+            print(f"[SpriteDBG] level_info candidates (start_game): {list(filter(None, candidates))}")
+            for name in filter(None, candidates):
+                info = self.db.get_screen(game_id, name)
+                if info and isinstance(info, dict):
+                    print(f"[SpriteDBG] level_info selected: {name}")
+                    break
         except Exception:
             info = None
         if info and isinstance(info, dict):
@@ -373,24 +437,110 @@ class Game:
         except Exception:
             self.level_bg_surface = None
 
-        # Load paddle from settings (sprite sheet region)
+        # Ek güvenlik: Tasarlanan seviye ekranının JSON'undan arkaplanı çek
+        # (overlay bulunmasa bile arkaplan uygula)
+        try:
+            if self.level_bg_surface is None:
+                lvl_num = self.level_manager.level
+                lvl_id = self._resolve_level_id(game_id, lvl_num)
+                candidates = [
+                    f"level_{lvl_num}_screen",
+                    f"level_{lvl_num}",
+                    (f"level_{lvl_id}_screen" if lvl_id else None),
+                    (f"level_{lvl_id}" if lvl_id else None),
+                ]
+                # pre-play ekran adayları (log: ekran teşhisi)
+                print(f"[SpriteDBG] pre-play bg candidates: {list(filter(None, candidates))}")
+                chosen_data = None
+                chosen_name = None
+                for name in filter(None, candidates):
+                    data = self.db.get_screen(game_id, name)
+                    if data and isinstance(data, dict):
+                        chosen_data = data
+                        chosen_name = name
+                        break
+                if chosen_data:
+                    bg_rel = ((chosen_data.get('background') or {}).get('image')) or ''
+                    path = self._abs_project_path(bg_rel) or (bg_rel if os.path.exists(bg_rel) else None)
+                    if path:
+                        try:
+                            img = pygame.image.load(path).convert()
+                            self.level_bg_surface = img
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # Load paddle (basket) from settings
         self.paddle_surface = None
         try:
             settings_map = settings_map if 'settings_map' in locals() else self.db.get_game_settings(game_id)
-            paddle_key = f"level_{self.level_manager.level}_paddle_sprite"
-            data = settings_map.get(paddle_key)
-            if data:
-                import json
-                info = json.loads(data)
-                sheet_path = self.db.get_sprite_path(int(info.get('sprite_id', 0)))
-                if sheet_path and os.path.exists(sheet_path):
-                    sheet_img = pygame.image.load(sheet_path).convert_alpha()
-                    rect = pygame.Rect(int(info['x']), int(info['y']), int(info['width']), int(info['height']))
-                    self.paddle_surface = sheet_img.subsurface(rect).copy()
+            # 1) Basket length (apply before creating Player)
+            try:
+                length_keys = [
+                    f"level_{self.level_manager.level}_basket_length",
+                    "basket_length",
+                    "Sepet Uzunluğu",
+                    "paddle_length",
+                ]
+                for k in length_keys:
+                    if k in settings_map and str(settings_map.get(k)).strip():
+                        settings.PLAYER_WIDTH = int(float(settings_map.get(k)))
+                        print(f"[SpriteDBG] paddle length from settings: {k}={settings_map.get(k)}")
+                        break
+            except Exception:
+                pass
+
+            # 2) Basket sprite as simple path
+            path_keys = [
+                f"level_{self.level_manager.level}_basket_sprite_path",
+                "basket_sprite_path",
+                "basket_sprite",
+                "Sepet Sprite",
+                "paddle_sprite",
+            ]
+            sprite_path = None
+            for k in path_keys:
+                val = settings_map.get(k)
+                if isinstance(val, str) and val.strip():
+                    sprite_path = val.strip()
+                    break
+            if sprite_path:
+                abs_path = sprite_path if os.path.exists(sprite_path) else (self._abs_project_path(sprite_path) or None)
+                if abs_path and os.path.exists(abs_path):
+                    try:
+                        self.paddle_surface = pygame.image.load(abs_path).convert_alpha()
+                        print(f"[SpriteDBG] paddle sprite (path) applied: {abs_path}")
+                    except Exception:
+                        self.paddle_surface = None
+                else:
+                    print(f"[SpriteDBG] paddle sprite (path) not found: {sprite_path}")
+
+            # 3) Basket sprite as region JSON (legacy/editor format)
+            if self.paddle_surface is None:
+                paddle_key = f"level_{self.level_manager.level}_paddle_sprite"
+                data = settings_map.get(paddle_key)
+                if data:
+                    import json
+                    try:
+                        info = json.loads(data)
+                    except Exception:
+                        info = None
+                    if info:
+                        sheet_path = self.db.get_sprite_path(int(info.get('sprite_id', 0)))
+                        if sheet_path and os.path.exists(sheet_path):
+                            sheet_img = pygame.image.load(sheet_path).convert_alpha()
+                            rect = pygame.Rect(int(info['x']), int(info['y']), int(info['width']), int(info['height']))
+                            self.paddle_surface = sheet_img.subsurface(rect).copy()
+                            print("[SpriteDBG] paddle sprite (region) applied")
+                        else:
+                            print(f"[SpriteDBG] paddle sprite (region) sheet not found: {sheet_path}")
         except Exception:
             self.paddle_surface = None
 
         self.game_state.player = Player(self.paddle_surface)
+        if self.paddle_surface is None:
+            print("[SpriteDBG] paddle fallback: rectangle (no sprite)")
         self.game_state.all_sprites.add(self.game_state.player)
         self.game_state.items.add(self.game_state.player) if False else None  # no-op to keep structure
         self.current_state = 'playing'
@@ -433,9 +583,10 @@ class Game:
         """
         data = self.level_overlay_data or {}
         bg_rel = ((data.get('background') or {}).get('image')) or ''
-        if bg_rel and os.path.exists(bg_rel):
+        path = self._abs_project_path(bg_rel) or (bg_rel if os.path.exists(bg_rel) else None)
+        if path:
             try:
-                img = pygame.image.load(bg_rel).convert()
+                img = pygame.image.load(path).convert()
                 self.level_bg_surface = img
             except Exception:
                 pass
@@ -515,7 +666,14 @@ class Game:
         - Doğru SFX / sfx_correct, Yanlış SFX / sfx_wrong: ses dosya yolları
         """
         data = self.level_overlay_data or {}
-        settings_map = data.get('settings') or {}
+        # Hem 'settings' hem de 'level_settings' kaynaklarını birleştir
+        settings_map = {}
+        try:
+            base_settings = data.get('settings') or {}
+            level_settings = data.get('level_settings') or {}
+            settings_map = {**base_settings, **level_settings}
+        except Exception:
+            settings_map = (data.get('settings') or {})
         # HUD sprite
         hud_path = (
             settings_map.get('HUD Sprite')
@@ -557,17 +715,25 @@ class Game:
             self.sfx_wrong = None
         # Paddle length (Sepet Uzunluğu)
         try:
-            paddle_len = settings_map.get('Sepet Uzunluğu') or settings_map.get('paddle_length')
+            paddle_len = settings_map.get('Sepet Uzunluğu') or settings_map.get('paddle_length') or settings_map.get('basket_length')
             if paddle_len:
                 settings.PLAYER_WIDTH = int(paddle_len)
         except Exception:
             pass
-        # Paddle sprite from settings
+        # Paddle sprite from settings (Sepet Sprite / paddle_sprite / basket_sprite)
         try:
-            paddle_path = settings_map.get('Sepet Sprite') or settings_map.get('paddle_sprite')
+            paddle_path = settings_map.get('Sepet Sprite') or settings_map.get('paddle_sprite') or settings_map.get('basket_sprite')
             if paddle_path and os.path.exists(paddle_path):
                 img = pygame.image.load(paddle_path).convert_alpha()
                 self.paddle_surface = img
+                print(f"[SpriteDBG] paddle sprite applied: {paddle_path}")
+            elif paddle_path:
+                # Göreli yolu proje köküne göre dene
+                path2 = self._abs_project_path(paddle_path)
+                if path2 and os.path.exists(path2):
+                    img = pygame.image.load(path2).convert_alpha()
+                    self.paddle_surface = img
+                    print(f"[SpriteDBG] paddle sprite applied (abs): {path2}")
         except Exception:
             pass
         # Music override from overlay
@@ -592,19 +758,29 @@ class Game:
             pass
 
         # Level oynanış ekranı için tasarım overlay'ini yükle (opsiyonel)
-        # Olası isimler: level_1_screen, level_1_play, level_1, playing
+        # Olası isimler (her iki şema):
+        # - level_<num>_screen, level_<num>_play, level_<num>
+        # - level_<id>_screen,  level_<id>_play,  level_<id>
         self.level_overlay_data = None
         try:
+            lvl_num = self.level_manager.level
+            lvl_id = self._resolve_level_id(game_id, lvl_num)
             candidate_names = [
-                f"level_{self.level_manager.level}_screen",
-                f"level_{self.level_manager.level}_play",
-                f"level_{self.level_manager.level}",
+                f"level_{lvl_num}_screen",
+                f"level_{lvl_num}_play",
+                f"level_{lvl_num}",
+                (f"level_{lvl_id}_screen" if lvl_id else None),
+                (f"level_{lvl_id}_play" if lvl_id else None),
+                (f"level_{lvl_id}" if lvl_id else None),
                 "playing",
             ]
-            for name in candidate_names:
+            # overlay adayları (log: ekran teşhisi)
+            print(f"[SpriteDBG] overlay candidates: {list(filter(None, candidate_names))}")
+            for name in filter(None, candidate_names):
                 data = self.db.get_screen(game_id, name)
                 if data and isinstance(data, dict):
                     self.level_overlay_data = data
+                    print(f"[SpriteDBG] overlay selected: {name}")
                     break
         except Exception:
             self.level_overlay_data = None
@@ -628,6 +804,30 @@ class Game:
             self._apply_overlay_settings()
         except Exception:
             pass
+
+        # Düşen nesneler için sprite regionlarından base surface'leri hazırla
+        try:
+            self.item_base_surfaces = []
+            lvl_num = self.level_manager.level
+            lvl_id = self._resolve_level_id(game_id, lvl_num)
+            if lvl_id:
+                regions = self.db.get_level_background_regions(lvl_id)
+                print(f"[SpriteDBG] item regions found: {len(regions)} for level_id={lvl_id}")
+                for r in regions:
+                    sheet = r.get('sheet_path')
+                    x, y, w, h = int(r.get('x', 0)), int(r.get('y', 0)), int(r.get('width', 0)), int(r.get('height', 0))
+                    try:
+                        if sheet and os.path.exists(sheet) and w > 0 and h > 0:
+                            img = pygame.image.load(sheet).convert_alpha()
+                            rect = pygame.Rect(x, y, w, h)
+                            rect = rect.clip(pygame.Rect(0, 0, img.get_width(), img.get_height()))
+                            sub = img.subsurface(rect).copy()
+                            self.item_base_surfaces.append(sub)
+                    except Exception:
+                        continue
+                print(f"[SpriteDBG] item base surfaces ready: {len(self.item_base_surfaces)}")
+        except Exception:
+            self.item_base_surfaces = []
 
     def _prepare_level_info_widgets(self):
         """Editor JSON'undan buton bölgelerini ve aksiyonlarını çıkarır."""
@@ -684,8 +884,9 @@ class Game:
         if draw_background:
             try:
                 bg_rel = ((data.get('background') or {}).get('image')) or ''
-                if bg_rel and os.path.exists(bg_rel):
-                    bg_img = pygame.image.load(bg_rel)
+                path = self._abs_project_path(bg_rel) or (bg_rel if os.path.exists(bg_rel) else None)
+                if path:
+                    bg_img = pygame.image.load(path)
                     self.screen.blit(pygame.transform.scale(bg_img, (SCREEN_WIDTH, SCREEN_HEIGHT)), (0, 0))
                 elif bg_surface:
                     self.screen.blit(pygame.transform.scale(bg_surface, (SCREEN_WIDTH, SCREEN_HEIGHT)), (0, 0))
@@ -910,7 +1111,16 @@ class Game:
 
     def spawn_item(self, text, category):
         """Yeni bir düşen nesne oluşturur ve hızını ayarlardan uygular."""
-        item = Item(text, category)
+        # Mevcut ise seviye sprite base yüzeylerinden birini kullan
+        base = None
+        try:
+            if self.item_base_surfaces:
+                import random as _rnd
+                base = _rnd.choice(self.item_base_surfaces)
+                print("[SpriteDBG] spawning item with sprite surface")
+        except Exception:
+            base = None
+        item = Item(text, category, base_surface=base)
         # Editörden gelen hız ayarını uygula
         try:
             speed = float(getattr(self.level_manager, 'item_speed', 3.0))

@@ -150,6 +150,32 @@ class Database:
             print(f"Database error: {e}")
             return None
 
+    def get_level_background_regions(self, level_id: int) -> list[dict]:
+        """Return sprite regions (with sheet path) mapped to a level for falling items backgrounds.
+
+        Joins level_background_regions -> sprite_regions -> sprites to obtain
+        sheet path and region geometry.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''
+                    SELECT sr.x, sr.y, sr.width, sr.height, s.path AS sheet_path
+                    FROM level_background_regions lbr
+                    JOIN sprite_regions sr ON sr.id = lbr.region_id
+                    JOIN sprites s ON s.id = sr.sprite_id
+                    WHERE lbr.level_id = ?
+                    ORDER BY lbr.id
+                    ''',
+                    (level_id,)
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            print(f"Database error: {e}")
+            return []
+
 class Carousel:
     """Manages the game selection carousel."""
     def __init__(self, games: list, font: pygame.font.Font):
