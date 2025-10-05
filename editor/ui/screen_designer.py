@@ -350,11 +350,37 @@ class ScreenDesignerWindow(tk.Toplevel):
         """
         try:
             name = (self.screen_name or "").strip().lower()
-            if name.startswith("level_"):
-                return int(name.split("_", 1)[1])
+            if not name.startswith("level_"):
+                return None
+            token = name.split("_", 1)[1]
+            cand = int(token)
+
+            # 1) Önce bu değeri gerçek DB level ID'si olarak doğrula
+            try:
+                if self.level_service is not None:
+                    row = self.level_service.get_level(cand)  # type: ignore[attr-defined]
+                    if row is not None:
+                        return cand
+            except Exception:
+                pass
+
+            # 2) Değilse, bu değeri seviye NUMARASI olarak yorumlayıp ID'ye eşle
+            try:
+                if self.level_service is not None and getattr(self, 'game_id', None):
+                    levels = self.level_service.get_levels(self.game_id)  # type: ignore[attr-defined]
+                    for lv in levels:
+                        try:
+                            if int(getattr(lv, 'level_number', -1)) == cand:
+                                return int(getattr(lv, 'id'))
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+            # 3) Son çare: ham değeri döndür (ileri aşamada doğrulama/hataya düşer)
+            return cand
         except Exception:
             return None
-        return None
 
     def _open_bg_region_picker(self) -> None:
         """Önceden tanımlanmış sprite region'lar arasından görsel önizlemeli çoklu seçim penceresi açar.
@@ -515,6 +541,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         row = ttk.Frame(wrap); row.pack(fill="x")
         for reg in show:
             try:
+                rid = int(reg.get('id', 0))
                 img_rel = str(reg.get("image_path") or "")
                 name = str(reg.get("name") or "")
                 x = int(reg.get("x", 0)); y = int(reg.get("y", 0))
@@ -538,13 +565,48 @@ class ScreenDesignerWindow(tk.Toplevel):
                 cell = ttk.Frame(row, padding=(4,2)); cell.pack(side=tk.LEFT)
                 if thumb:
                     tk.Label(cell, image=thumb).pack()
-                ttk.Label(cell, text=name).pack()
+                # Silme butonu: bu bölgeyi seçili listeden kaldırır
+                btn_row = ttk.Frame(cell); btn_row.pack(fill="x")
+                ttk.Label(btn_row, text=name).pack(side=tk.LEFT)
+                def _do_remove(rid_val: int = rid):
+                    try:
+                        level_id = getattr(self, 'level_id', None)
+                        if not (self.level_service and level_id):
+                            return
+                        current = list(self.level_service.get_level_background_region_ids(level_id))  # type: ignore[attr-defined]
+                        if rid_val in current:
+                            new_list = [x for x in current if x != rid_val]
+                            self.level_service.set_level_background_region_ids(level_id, new_list)  # type: ignore[attr-defined]
+                            # UI yenile
+                            self._refresh_bg_region_preview()
+                            self._update_item_bg_preview()
+                    except Exception as e:
+                        try:
+                            messagebox.showerror("Hata", f"Bölge silinemedi: {e}")
+                        except Exception:
+                            pass
+                ttk.Button(btn_row, text="Sil", width=4, command=_do_remove).pack(side=tk.RIGHT, padx=(6,0))
             except Exception:
                 continue
 
         # Kanvasta büyük önizlemeyi güncelle
         try:
             self._update_item_bg_preview()
+        except Exception:
+            pass
+
+    # Yardımcı: Önizleme üzerinden silme butonlarının kullanacağı fonksiyon (gerekirse doğrudan da çağrılabilir)
+    def _remove_level_bg_region(self, region_id: int) -> None:
+        try:
+            level_id = getattr(self, 'level_id', None)
+            if not (self.level_service and level_id):
+                return
+            current = list(self.level_service.get_level_background_region_ids(level_id))  # type: ignore[attr-defined]
+            if region_id in current:
+                new_list = [x for x in current if x != region_id]
+                self.level_service.set_level_background_region_ids(level_id, new_list)  # type: ignore[attr-defined]
+                self._refresh_bg_region_preview()
+                self._update_item_bg_preview()
         except Exception:
             pass
 

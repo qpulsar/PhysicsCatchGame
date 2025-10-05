@@ -41,10 +41,14 @@ class Item(pygame.sprite.Sprite):
     
     def _create_image(self, base_surface: pygame.Surface | None = None):
         """Create the item's image with sprite or fallback to simple shape"""
+        try:
+            print(f"[ItemDBG] create_image: base_surface={'yes' if base_surface is not None else 'no'} text='{self.text}'")
+        except Exception:
+            pass
         # 1) Dışarıdan verilen base_surface öncelikli
         if base_surface is not None:
             try:
-                print("[SpriteDBG] item: using provided base_surface")
+                print("[ItemDBG] using provided base_surface")
                 self.image = pygame.transform.smoothscale(base_surface, (ITEM_WIDTH, ITEM_HEIGHT)).convert_alpha()
                 self._add_text_to_image()
                 return
@@ -73,7 +77,7 @@ class Item(pygame.sprite.Sprite):
 
             # Choose a random button sprite
             base_button = random.choice(Item._button_sprites)
-            print("[SpriteDBG] item: using sheet button sprite")
+            print("[ItemDBG] using sheet button sprite")
             
             # Scale the sprite to match item dimensions while maintaining aspect ratio
             self.image = pygame.transform.smoothscale(base_button, (ITEM_WIDTH, ITEM_HEIGHT)).convert_alpha()
@@ -156,12 +160,4 @@ class Item(pygame.sprite.Sprite):
             return
             
         self.rect.y += self.speed_y
-        
-        # Debug output for item position
-        if hasattr(self, 'debug_counter'):
-            self.debug_counter += 1
-            if self.debug_counter >= 60:  # Print every second (assuming 60 FPS)
-                print(f"Item '{self.text}' at position: {self.rect.topleft}")
-                self.debug_counter = 0
-        else:
-            self.debug_counter = 0
+

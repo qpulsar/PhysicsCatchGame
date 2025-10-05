@@ -2,6 +2,7 @@ import pygame
 import os
 import sys
 import argparse
+import inspect
 from settings import SCREEN_WIDTH, SCREEN_HEIGHT
 from game.app import Game
 
@@ -19,6 +20,15 @@ if __name__ == "__main__":
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Fiziksel Büyüklükleri Yakala!")
+
+    # Basit çalışma zamanı tanılama logu (doğru dosya ve sınıf mı?)
+    try:
+        print(f"[RunDBG] main: __file__={__file__}")
+        print(f"[RunDBG] main: cwd={os.getcwd()}")
+        print(f"[RunDBG] args: game_id={args.game_id}, from_editor={args.from_editor}")
+        print(f"[RunDBG] Game class at: {inspect.getfile(Game)} (module={Game.__module__})")
+    except Exception:
+        pass
 
     # Editörden geldiyse seçili oyunla başla ve açılış ekranını göster
     if args.game_id:

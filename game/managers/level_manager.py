@@ -150,7 +150,7 @@ class LevelManager:
         self.total_items_to_spawn = 0
         self.spawn_ready = False
         
-        print(f"Level {level_number} for Game {game_id} setup complete. Target: {self.target_category}")
+        # debug log kaldırıldı
 
         # Apply per-game settings (optional, with fallbacks)
         try:
@@ -210,11 +210,7 @@ class LevelManager:
             min_items: Minimum number of items to spawn additionally.
             max_items: Maximum number of items to spawn additionally.
         """
-        print("\n=== Preparing Spawn Events ===")
-        print(f"Target category: {self.target_category}")
-        print(f"Correct items: {self.correct_items}")
-        print(f"Caught correct: {self.caught_correct}")
-        print(f"Dropped correct: {self.dropped_correct}")
+        # debug log kaldırıldı
         
         # Always spawn at least the remaining correct items
         remaining_correct = [
@@ -226,11 +222,11 @@ class LevelManager:
         additional_items = max(0, random.randint(min_items, max_items) - len(remaining_correct))
         total_items = len(remaining_correct) + additional_items
         
-        print(f"Will spawn {total_items} items ({len(remaining_correct)} remaining correct + {additional_items} random)")
+        # debug log kaldırıldı
         
         self.spawn_events = []
         current_time = pygame.time.get_ticks()
-        print(f"Current time: {current_time}")
+        # debug log kaldırıldı
         
         # First, handle items that need to be respawned from level_queue
         for item_text in self.level_queue[:]:  # Use a copy to safely modify the original
@@ -242,7 +238,7 @@ class LevelManager:
                 'item_text': item_text,
                 'category': self.target_category
             })
-            print(f"  - Will respawn queued item: {item_text} at {current_time}ms")
+            # debug log kaldırıldı
             
             # Remove from queue after scheduling for respawn
             self.level_queue.remove(item_text)
@@ -265,7 +261,7 @@ class LevelManager:
                 'category': self.target_category
             })
             self.dropped_correct.append(item_text)
-            print(f"  - Will spawn remaining correct item: {item_text} at {current_time}ms")
+            # debug log kaldırıldı
         
         # Add additional random items if needed
         for _ in range(additional_items):
@@ -283,9 +279,9 @@ class LevelManager:
                 'item_text': item_text,
                 'category': category
             })
-            print(f"  - Will spawn random item: {item_text} ({category}) at {current_time}ms")
+            # debug log kaldırıldı
             
-        print(f"Total spawn events prepared: {len(self.spawn_events)}")
+        # debug log kaldırıldı
         
         self.spawn_index = 0
         self.item_spawned_count = 0

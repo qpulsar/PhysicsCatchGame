@@ -185,6 +185,7 @@ class Game:
             if os.path.isabs(p):
                 return p if os.path.exists(p) else None
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            # Debug yazıları temizlendi
             cand = os.path.join(project_root, p)
             return cand if os.path.exists(cand) else None
         except Exception:
@@ -283,12 +284,11 @@ class Game:
                                 f"level_{lvl_num}_info",
                                 f"level_{lvl_id}_info" if lvl_id else None,
                             ]
-                            # info ekran adayları (log: ekran teşhisi)
-                            print(f"[SpriteDBG] level_info candidates (opening click): {list(filter(None, candidates))}")
+                            # debug log kaldırıldı
                             for name in filter(None, candidates):
                                 info = self.db.get_screen(self.selected_game_id, name)
                                 if info and isinstance(info, dict):
-                                    print(f"[SpriteDBG] level_info selected: {name}")
+                                    # debug log kaldırıldı
                                     break
                         except Exception:
                             info = None
@@ -406,11 +406,11 @@ class Game:
                 f"level_{lvl_num}_info",
                 f"level_{lvl_id}_info" if lvl_id else None,
             ]
-            print(f"[SpriteDBG] level_info candidates (start_game): {list(filter(None, candidates))}")
+            # debug log kaldırıldı
             for name in filter(None, candidates):
                 info = self.db.get_screen(game_id, name)
                 if info and isinstance(info, dict):
-                    print(f"[SpriteDBG] level_info selected: {name}")
+                    # debug log kaldırıldı
                     break
         except Exception:
             info = None
@@ -424,6 +424,10 @@ class Game:
 
     def _start_playing(self, game_id):
         """Editördeki ayarları uygulayarak oyunu ve Level 1'i başlatır."""
+        try:
+            print(f"[SpriteDBG] _start_playing: game_id={game_id}")
+        except Exception:
+            pass
         self.level_manager.setup_level(1, game_id)
 
         # Load level-specific background if available
@@ -449,8 +453,7 @@ class Game:
                     (f"level_{lvl_id}_screen" if lvl_id else None),
                     (f"level_{lvl_id}" if lvl_id else None),
                 ]
-                # pre-play ekran adayları (log: ekran teşhisi)
-                print(f"[SpriteDBG] pre-play bg candidates: {list(filter(None, candidates))}")
+                # debug log kaldırıldı
                 chosen_data = None
                 chosen_name = None
                 for name in filter(None, candidates):
@@ -471,57 +474,126 @@ class Game:
         except Exception:
             pass
 
+        # EARLY: Düşen nesneler için sprite regionlarından base surface'leri, spawn başlamadan hazırlayalım
+        try:
+            self.item_base_surfaces = []
+            lvl_num = self.level_manager.level
+            lvl_id = self._resolve_level_id(game_id, lvl_num)
+            print(f"[SpriteDBG] preparing item surfaces (early) for game_id={game_id}, level_num={lvl_num}, level_id={lvl_id}")
+
+            def _early_load_item_surfaces(level_id: int) -> int:
+                regions = self.db.get_level_background_regions(level_id)
+                print(f"[SpriteDBG] item regions found: {len(regions)} for level_id={level_id}")
+                for r in regions:
+                    sheet_rel = r.get('sheet_path')
+                    x, y, w, h = int(r.get('x', 0)), int(r.get('y', 0)), int(r.get('width', 0)), int(r.get('height', 0))
+                    try:
+                        sheet_abs = self._abs_project_path(sheet_rel) or (sheet_rel if sheet_rel and os.path.exists(sheet_rel) else None)
+                        print(f"[SpriteDBG] region path: rel={sheet_rel} -> abs={sheet_abs}; size=({w}x{h})")
+                        if not sheet_abs or w <= 0 or h <= 0:
+                            continue
+                        img = pygame.image.load(sheet_abs).convert_alpha()
+                        rect = pygame.Rect(x, y, w, h).clip(pygame.Rect(0, 0, img.get_width(), img.get_height()))
+                        if rect.width <= 0 or rect.height <= 0:
+                            continue
+                        self.item_base_surfaces.append(img.subsurface(rect).copy())
+                    except Exception:
+                        continue
+                return len(self.item_base_surfaces)
+
+            if lvl_id:
+                cnt = _early_load_item_surfaces(lvl_id)
+                if cnt == 0:
+                    try:
+                        levels = self.db.get_levels(game_id)
+                        for row in levels:
+                            other_id = int(row.get('id'))
+                            if other_id == lvl_id:
+                                continue
+                            prev = len(self.item_base_surfaces)
+                            found = _early_load_item_surfaces(other_id)
+                            if found > prev:
+                                try:
+                                    self.level_manager.setup_level(int(row.get('level_number', 1)), game_id)
+                                except Exception:
+                                    pass
+                                break
+                    except Exception:
+                        pass
+            print(f"[SpriteDBG] item base surfaces ready (early): {len(self.item_base_surfaces)}")
+            # Ultimate fallback: DB'de bölge yoksa, assets/images içinden direkt görselleri kullan
+            if not self.item_base_surfaces:
+                try:
+                    assets_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'assets', 'images')
+                    added = 0
+                    if os.path.isdir(assets_dir):
+                        for fn in sorted(os.listdir(assets_dir)):
+                            if not fn.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                                continue
+                            path = os.path.join(assets_dir, fn)
+                            try:
+                                img = pygame.image.load(path).convert_alpha()
+                                # Basit ölçek: ITEM_WIDTH x ITEM_HEIGHT
+                                surf = pygame.transform.smoothscale(img, (ITEM_WIDTH, ITEM_HEIGHT))
+                                self.item_base_surfaces.append(surf)
+                                added += 1
+                                if added >= 8:
+                                    break
+                            except Exception:
+                                continue
+                    print(f"[SpriteDBG] fallback added surfaces from assets/images: {added}")
+                except Exception:
+                    pass
+        except Exception:
+            self.item_base_surfaces = []
+
         # Load paddle (basket) from the level's screen design
         self.paddle_surface = None
         basket_length = 128 # Default length
         try:
             level_screen_name = f"level_{self.level_manager.level}"
-            print(f"[BASKET_DEBUG] Trying to load screen: {level_screen_name}")
             screen_data = self.db.get_screen(game_id, level_screen_name)
-            
+
             if not screen_data:
                 level_id = self._resolve_level_id(game_id, self.level_manager.level)
-                print(f"[BASKET_DEBUG] Fallback to level_id: {level_id}")
                 if level_id:
                     level_screen_name = f"level_{level_id}"
-                    print(f"[BASKET_DEBUG] Trying to load screen with ID: {level_screen_name}")
                     screen_data = self.db.get_screen(game_id, level_screen_name)
 
             if screen_data and 'level_settings' in screen_data:
-                print("[BASKET_DEBUG] Screen data and level_settings found.")
+                # debug log kaldırıldı
                 level_settings = screen_data['level_settings']
                 basket_sprite_key = level_settings.get('basket_sprite')
                 basket_length = int(level_settings.get('basket_length', 128))
-                print(f"[BASKET_DEBUG] Basket Sprite Key: {basket_sprite_key}, Length: {basket_length}")
+                # debug log kaldırıldı
 
                 if basket_sprite_key:
                     region_info = self.db.get_sprite_region(basket_sprite_key)
-                    print(f"[BASKET_DEBUG] DB region_info: {region_info}")
+                    # debug log kaldırıldı
                     if region_info:
                         sheet_path_abs = self._abs_project_path(region_info['sheet_path'])
-                        print(f"[BASKET_DEBUG] Absolute sheet path: {sheet_path_abs}")
+                        # debug log kaldırıldı
                         if sheet_path_abs:
                             sheet_img = pygame.image.load(sheet_path_abs).convert_alpha()
                             region_rect = pygame.Rect(region_info['x'], region_info['y'], region_info['width'], region_info['height'])
                             self.paddle_surface = sheet_img.subsurface(region_rect).copy()
-                            print(f"[BASKET_DEBUG] SUCCESS: Basket sprite loaded from region: {basket_sprite_key}")
+                            # debug log kaldırıldı
                         else:
-                            print(f"[BASKET_DEBUG] ERROR: Basket sheet not found at path: {region_info['sheet_path']}")
+                            pass
                     else:
-                        print(f"[BASKET_DEBUG] ERROR: Basket sprite region not found in DB for key: {basket_sprite_key}")
+                        pass
                 else:
-                    print("[BASKET_DEBUG] WARNING: basket_sprite key not found in level_settings.")
+                    pass
             else:
-                print("[BASKET_DEBUG] ERROR: screen_data or level_settings not found.")
+                pass
         except Exception as e:
-            print(f"[BASKET_DEBUG] CRITICAL ERROR loading basket: {e}")
+            pass
 
         # Create the player sprite
         if self.paddle_surface:
             self.game_state.player = Player(image=self.paddle_surface, length=basket_length)
         else:
             # Fallback to a default rectangle if no sprite is found
-            print("[SpriteDBG] paddle fallback: rectangle (no sprite)")
             fallback_surface = pygame.Surface((basket_length, 30))
             fallback_surface.fill(ORANGE)
             self.game_state.player = Player(image=fallback_surface, length=basket_length)
@@ -764,13 +836,12 @@ class Game:
                 (f"level_{lvl_id}" if lvl_id else None),
                 "playing",
             ]
-            # overlay adayları (log: ekran teşhisi)
-            print(f"[SpriteDBG] overlay candidates: {list(filter(None, candidate_names))}")
+            # debug log kaldırıldı
             for name in filter(None, candidate_names):
                 data = self.db.get_screen(game_id, name)
                 if data and isinstance(data, dict):
                     self.level_overlay_data = data
-                    print(f"[SpriteDBG] overlay selected: {name}")
+                    # debug log kaldırıldı
                     break
         except Exception:
             self.level_overlay_data = None
@@ -800,6 +871,7 @@ class Game:
             self.item_base_surfaces = []
             lvl_num = self.level_manager.level
             lvl_id = self._resolve_level_id(game_id, lvl_num)
+            print(f"[SpriteDBG] preparing item surfaces for game_id={game_id}, level_num={lvl_num}, level_id={lvl_id}")
 
             def _load_item_surfaces_for_level(level_id: int) -> int:
                 regions = self.db.get_level_background_regions(level_id)
@@ -810,6 +882,7 @@ class Game:
                     try:
                         # Resolve absolute path for relative asset paths
                         sheet_abs = self._abs_project_path(sheet_rel) or (sheet_rel if sheet_rel and os.path.exists(sheet_rel) else None)
+                        print(f"[SpriteDBG] region path: rel={sheet_rel} -> abs={sheet_abs}; size=({w}x{h})")
                         if not sheet_abs:
                             print(f"[SpriteDBG] item sheet not found: rel={sheet_rel}")
                             continue
@@ -854,6 +927,8 @@ class Game:
                     except Exception:
                         pass
             print(f"[SpriteDBG] item base surfaces ready: {len(self.item_base_surfaces)}")
+            if not self.item_base_surfaces:
+                print("[SpriteDBG] WARNING: item_base_surfaces is EMPTY; items will fallback to sheet or simple shapes.")
         except Exception as e:
             print(f"[SpriteDBG] preparing item base surfaces failed: {e}")
             self.item_base_surfaces = []
@@ -1143,14 +1218,17 @@ class Game:
         # Mevcut ise seviye sprite base yüzeylerinden birini kullan
         base = None
         try:
-            if self.item_base_surfaces:
+            pool_len = len(self.item_base_surfaces) if isinstance(getattr(self, 'item_base_surfaces', None), list) else 0
+            print(f"[SpriteDBG] spawn_item: pool_len={pool_len} text='{text}' category='{category}'")
+            if pool_len:
                 import random as _rnd
                 base = _rnd.choice(self.item_base_surfaces)
-                print("[SpriteDBG] spawning item with sprite surface")
-        except Exception:
+                print("[SpriteDBG] spawn_item: using base_surface from pool")
+        except Exception as _:
             base = None
         item = Item(text, category, base_surface=base)
-        # Editörden gelen hız ayarını uygula
+        print(f"[SpriteDBG] spawn_item: base_surface={base is not None} text='{text}' category='{category}'")
+        # Hız ayarı: game settings üzerinden gelen değer
         try:
             speed = float(getattr(self.level_manager, 'item_speed', 3.0))
             if speed > 0:
