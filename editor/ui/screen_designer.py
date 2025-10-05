@@ -319,6 +319,18 @@ class ScreenDesignerWindow(tk.Toplevel):
                                                   values=["none","top-left","top-right","bottom-left","bottom-right"])
         self.level_help_area_combo.pack(side=tk.LEFT, expand=True, fill="x", padx=(4,0))
 
+        # Efekt sprite sheet (6x5) seçimleri
+        lf_row6 = ttk.Frame(self.level_frame); lf_row6.pack(fill="x", pady=(6,0))
+        ttk.Label(lf_row6, text="Doğru Efekt (6x5):").pack(side=tk.LEFT)
+        self.level_effect_ok_var = tk.StringVar()
+        self.level_effect_ok_combo = ttk.Combobox(lf_row6, textvariable=self.level_effect_ok_var, state="readonly")
+        self.level_effect_ok_combo.pack(side=tk.LEFT, expand=True, fill="x", padx=(4,0))
+        lf_row7 = ttk.Frame(self.level_frame); lf_row7.pack(fill="x", pady=(2,0))
+        ttk.Label(lf_row7, text="Yanlış Efekt (6x5):").pack(side=tk.LEFT)
+        self.level_effect_bad_var = tk.StringVar()
+        self.level_effect_bad_combo = ttk.Combobox(lf_row7, textvariable=self.level_effect_bad_var, state="readonly")
+        self.level_effect_bad_combo.pack(side=tk.LEFT, expand=True, fill="x", padx=(4,0))
+
         # Initially hide detail frames
         self.label_frame.pack_forget()
         self.button_frame.pack_forget()
@@ -816,6 +828,22 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._audios = audios
         self.bg_combo['values'] = images
         self.music_combo['values'] = audios
+        # Level efekt ve sprite combobox'larını da doldur
+        try:
+            self.level_basket_sprite_combo['values'] = images
+        except Exception:
+            pass
+        try:
+            self.level_hud_sprite_combo['values'] = images
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'level_effect_ok_combo'):
+                self.level_effect_ok_combo['values'] = images
+            if hasattr(self, 'level_effect_bad_combo'):
+                self.level_effect_bad_combo['values'] = images
+        except Exception:
+            pass
 
         # Varsayılan seçimleri doldur
         if images and not self.bg_path_var.get():
@@ -1369,6 +1397,8 @@ class ScreenDesignerWindow(tk.Toplevel):
                     "sfx_wrong": self.level_sfx_bad_var.get().strip(),
                     "hud_sprite": self.level_hud_sprite_var.get().strip(),
                     "help_area": self.level_help_area_var.get().strip() or "none",
+                    "effect_correct_sheet": self.level_effect_ok_var.get().strip(),
+                    "effect_wrong_sheet": self.level_effect_bad_var.get().strip(),
                 }
             except Exception:
                 # Bozuk değerler varsa sessizce atla
@@ -1424,6 +1454,10 @@ class ScreenDesignerWindow(tk.Toplevel):
                             self.level_hud_sprite_var.set(lv.get("hud_sprite"))
                         if lv.get("help_area"):
                             self.level_help_area_var.set(str(lv.get("help_area")))
+                        if lv.get("effect_correct_sheet") and lv.get("effect_correct_sheet") in (self._images if hasattr(self, "_images") else []):
+                            self.level_effect_ok_var.set(lv.get("effect_correct_sheet"))
+                        if lv.get("effect_wrong_sheet") and lv.get("effect_wrong_sheet") in (self._images if hasattr(self, "_images") else []):
+                            self.level_effect_bad_var.set(lv.get("effect_wrong_sheet"))
                     # Mevcut veriyi yükledikten sonra önizlemeleri göster
                     self.after(100, self._update_basket_preview)  # UI'nin çizilmesini bekle
                     self.after(120, self._update_item_bg_preview)

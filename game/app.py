@@ -1,4 +1,4 @@
-import pygame
+﻿import pygame
 import sys
 import subprocess
 import os
@@ -32,19 +32,21 @@ class Game:
         self.per_game_bg_surface = None
         self.level_bg_surface = None
         self.paddle_surface = None
-        # Level oynanış ekranı için tasarım katmanı (widget overlay)
+        # Level oynanÄ±ÅŸ ekranÄ± iÃ§in tasarÄ±m katmanÄ± (widget overlay)
         self.level_overlay_data = None
         self.level_overlay_buttons = []  # list of {rect, action, text}
-        # Tasarım kaynaklı sesler
+        # TasarÄ±m kaynaklÄ± sesler
         self.sfx_correct = None
         self.sfx_wrong = None
-        # Designed level-info screen state
+        # Tasarım kaynaklı sprite-sheet efekt yolları (6x5 grid varsayılan)
+        self.effect_sheet_correct_path = None
+        self.effect_sheet_wrong_path = None        # Designed level-info screen state
         self.level_info_data = None  # parsed JSON from editor
         self.level_info_buttons = []  # list of {rect, action, text}
         # Opening screen state (from editor)
         self.opening_data = None
         self.opening_buttons = []
-        # Düşen nesneler için sprite yüzeyleri (level_background_regions tabanlı)
+        # DÃ¼ÅŸen nesneler iÃ§in sprite yÃ¼zeyleri (level_background_regions tabanlÄ±)
         self.item_base_surfaces: list[pygame.Surface] = []
 
         # Game Selection Screen
@@ -52,7 +54,7 @@ class Game:
         self.games = self.db.get_games()
         self.carousel = Carousel(self.games, self.font) if self.games else None
 
-        # Başlangıç durumu: dışarıdan bir oyun ID'si verilirse doğrudan bilgi ekranına geç
+        # BaÅŸlangÄ±Ã§ durumu: dÄ±ÅŸarÄ±dan bir oyun ID'si verilirse doÄŸrudan bilgi ekranÄ±na geÃ§
         self.selected_game_id = None
         self.selected_game = None
         if force_game_id:
@@ -66,7 +68,7 @@ class Game:
                     self.per_game_bg_surface = pygame.image.load(bg_path).convert()
             except Exception:
                 self.per_game_bg_surface = None
-            # Eğer başlangıç durumu verilmemişse ve editörde 'opening' tanımlıysa önce onu göster
+            # EÄŸer baÅŸlangÄ±Ã§ durumu verilmemiÅŸse ve editÃ¶rde 'opening' tanÄ±mlÄ±ysa Ã¶nce onu gÃ¶ster
             if start_state:
                 self.current_state = start_state
             else:
@@ -91,7 +93,7 @@ class Game:
         self.finish_bg = self.level_bgs[-1] if self.level_bgs else pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 
     def run(self):
-        """Ana oyun döngüsünü çalıştırır."""
+        """Ana oyun dÃ¶ngÃ¼sÃ¼nÃ¼ Ã§alÄ±ÅŸtÄ±rÄ±r."""
         running = True
         while running:
             running = self.handle_events()
@@ -103,15 +105,15 @@ class Game:
         sys.exit()
 
     def _load_default_backgrounds(self):
-        """Yoksa hata vermeyen, esnek varsayılan arkaplan yükleyici.
+        """Yoksa hata vermeyen, esnek varsayÄ±lan arkaplan yÃ¼kleyici.
 
-        Öncelik sırası:
+        Ã–ncelik sÄ±rasÄ±:
         1) img/backgrounds/{2..5}.jpg
-        2) assets/images/ içindeki mevcut jpg/png dosyaları
-        3) Düz renk yüzeyler (ayarlanmış paletten)
+        2) assets/images/ iÃ§indeki mevcut jpg/png dosyalarÄ±
+        3) DÃ¼z renk yÃ¼zeyler (ayarlanmÄ±ÅŸ paletten)
 
         Returns:
-            list[pygame.Surface]: Ekran boyutunda arkaplan yüzeyleri listesi
+            list[pygame.Surface]: Ekran boyutunda arkaplan yÃ¼zeyleri listesi
         """
         candidates = []
         # 1) legacy backgrounds
@@ -119,13 +121,13 @@ class Game:
             p = os.path.join('img', 'backgrounds', f'{i}.jpg')
             if os.path.exists(p):
                 candidates.append(p)
-        # 2) assets/images altından al
+        # 2) assets/images altÄ±ndan al
         assets_img_dir = os.path.join('assets', 'images')
         if os.path.isdir(assets_img_dir):
             for fn in sorted(os.listdir(assets_img_dir)):
                 if fn.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
                     candidates.append(os.path.join(assets_img_dir, fn))
-        # Görselleri yükle
+        # GÃ¶rselleri yÃ¼kle
         surfaces = []
         for path in candidates:
             try:
@@ -145,9 +147,9 @@ class Game:
         return [self._make_color_surface(c) for c in palette]
 
     def _prepare_overlay_widgets(self):
-        """Oynanış overlay'i (tasarım) için buton bölgelerini hazırlar.
+        """OynanÄ±ÅŸ overlay'i (tasarÄ±m) iÃ§in buton bÃ¶lgelerini hazÄ±rlar.
 
-        Editor ekranında 'button' tipli widget'lardan Rect ve action çıkarır.
+        Editor ekranÄ±nda 'button' tipli widget'lardan Rect ve action Ã§Ä±karÄ±r.
         """
         self.level_overlay_buttons = []
         data = self.level_overlay_data or {}
@@ -166,17 +168,17 @@ class Game:
                 continue
 
     def _make_color_surface(self, color):
-        """Belirtilen renkte ekran boyutunda yüzey üretir."""
+        """Belirtilen renkte ekran boyutunda yÃ¼zey Ã¼retir."""
         surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         surf.fill(color)
         return surf
 
     def _abs_project_path(self, rel: str) -> str | None:
-        """Proje köküne göre göreli yolu mutlak hale getirir.
+        """Proje kÃ¶kÃ¼ne gÃ¶re gÃ¶reli yolu mutlak hale getirir.
 
-        Screen Designer göreli yolları (assets/...) kaydeder. Çalışma dizini
-        farklı olduğunda dosya bulunamayabilir; bu yardımcı, oyunun konumuna göre
-        kökten çözer.
+        Screen Designer gÃ¶reli yollarÄ± (assets/...) kaydeder. Ã‡alÄ±ÅŸma dizini
+        farklÄ± olduÄŸunda dosya bulunamayabilir; bu yardÄ±mcÄ±, oyunun konumuna gÃ¶re
+        kÃ¶kten Ã§Ã¶zer.
         """
         try:
             if not rel:
@@ -185,17 +187,17 @@ class Game:
             if os.path.isabs(p):
                 return p if os.path.exists(p) else None
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            # Debug yazıları temizlendi
+            # Debug yazÄ±larÄ± temizlendi
             cand = os.path.join(project_root, p)
             return cand if os.path.exists(cand) else None
         except Exception:
             return None
 
     def _resolve_level_id(self, game_id: int, level_number: int) -> int | None:
-        """Verilen oyun ve seviye numarası için DB'deki seviye ID'sini döndürür.
+        """Verilen oyun ve seviye numarasÄ± iÃ§in DB'deki seviye ID'sini dÃ¶ndÃ¼rÃ¼r.
 
-        Editor, ekranları genellikle `level_<id>` adıyla kaydediyor. Oyun tarafında
-        numaradan ID'ye köprü kurmak için bu yardımcıyı kullanıyoruz.
+        Editor, ekranlarÄ± genellikle `level_<id>` adÄ±yla kaydediyor. Oyun tarafÄ±nda
+        numaradan ID'ye kÃ¶prÃ¼ kurmak iÃ§in bu yardÄ±mcÄ±yÄ± kullanÄ±yoruz.
         """
         try:
             levels = self.db.get_levels(game_id)
@@ -208,7 +210,7 @@ class Game:
         return None
 
     def handle_events(self):
-        """Girdi olaylarını işler ve durum geçişlerini yönetir."""
+        """Girdi olaylarÄ±nÄ± iÅŸler ve durum geÃ§iÅŸlerini yÃ¶netir."""
         mouse_pos = pygame.mouse.get_pos()
 
         for event in pygame.event.get():
@@ -221,7 +223,7 @@ class Game:
                         subprocess.Popen([sys.executable, "editor/editor.py"])
                         return False
                     except Exception as e:
-                        print(f"Editör başlatılamadı: {e}")
+                        print(f"EditÃ¶r baÅŸlatÄ±lamadÄ±: {e}")
                 else:
                     self.handle_mouse_click(event.pos)
 
@@ -239,7 +241,7 @@ class Game:
                             self.per_game_bg_surface = pygame.image.load(bg_path).convert()
                     except Exception as _:
                         self.per_game_bg_surface = None
-                    # Seçim sonrası: eğer editörde 'opening' tanımlıysa doğrudan açılış ekranına geç
+                    # SeÃ§im sonrasÄ±: eÄŸer editÃ¶rde 'opening' tanÄ±mlÄ±ysa doÄŸrudan aÃ§Ä±lÄ±ÅŸ ekranÄ±na geÃ§
                     try:
                         opening = self.db.get_screen(self.selected_game_id, 'opening')
                     except Exception:
@@ -268,14 +270,14 @@ class Game:
 
     def handle_mouse_click(self, pos):
         if self.current_state == 'opening':
-            # Opening ekranındaki butonlara tıkla
+            # Opening ekranÄ±ndaki butonlara tÄ±kla
             for b in self.opening_buttons:
                 if b['rect'].collidepoint(pos):
                     act = b.get('action')
                     if act in ('start_game', 'continue'):
-                        # opening sonrası akış: level info varsa gösterilecek, yoksa oynanış
-                        # Screen Designer bazı kurulumlarda seviye ekranlarını level_<DB id> adıyla kaydediyor.
-                        # Oyunda hem numaraya hem de DB id'ye göre isimleri deneyelim.
+                        # opening sonrasÄ± akÄ±ÅŸ: level info varsa gÃ¶sterilecek, yoksa oynanÄ±ÅŸ
+                        # Screen Designer bazÄ± kurulumlarda seviye ekranlarÄ±nÄ± level_<DB id> adÄ±yla kaydediyor.
+                        # Oyunda hem numaraya hem de DB id'ye gÃ¶re isimleri deneyelim.
                         try:
                             info = None
                             lvl_num = 1
@@ -284,11 +286,11 @@ class Game:
                                 f"level_{lvl_num}_info",
                                 f"level_{lvl_id}_info" if lvl_id else None,
                             ]
-                            # debug log kaldırıldı
+                            # debug log kaldÄ±rÄ±ldÄ±
                             for name in filter(None, candidates):
                                 info = self.db.get_screen(self.selected_game_id, name)
                                 if info and isinstance(info, dict):
-                                    # debug log kaldırıldı
+                                    # debug log kaldÄ±rÄ±ldÄ±
                                     break
                         except Exception:
                             info = None
@@ -305,7 +307,7 @@ class Game:
             if self.start_button_rect and self.start_button_rect.collidepoint(pos):
                 self.start_game(self.selected_game_id)
         elif self.current_state == 'level_info':
-            # Tasarlanan bilgi ekranındaki butonlara tıkla
+            # Tasarlanan bilgi ekranÄ±ndaki butonlara tÄ±kla
             for b in self.level_info_buttons:
                 if b['rect'].collidepoint(pos):
                     act = b.get('action')
@@ -319,7 +321,7 @@ class Game:
         elif self.current_state == 'playing':
             if self.game_state.help_button_rect.collidepoint(pos):
                 self.game_state.help_mode = not self.game_state.help_mode
-            # Overlay buton aksiyonları
+            # Overlay buton aksiyonlarÄ±
             try:
                 for b in self.level_overlay_buttons:
                     if b['rect'].collidepoint(pos):
@@ -329,10 +331,10 @@ class Game:
                         elif act == 'back':
                             self.current_state = 'game_selection'
                         elif act == 'continue' or act == 'resume':
-                            # Şimdilik no-op; ileride pause desteği eklenebilir
+                            # Åimdilik no-op; ileride pause desteÄŸi eklenebilir
                             pass
                         elif act == 'start_game':
-                            # Zaten oyun içindeyiz; no-op
+                            # Zaten oyun iÃ§indeyiz; no-op
                             pass
                         break
             except Exception:
@@ -344,10 +346,10 @@ class Game:
                 self.current_state = 'playing'
 
     def _draw_wrapped_topleft(self, surface, text: str, font_size: int, x: int, y: int, color, wrap_width: int | None = None):
-        """Sol-üst (tkinter NW) anchora göre çok satırlı metin çizer.
+        """Sol-Ã¼st (tkinter NW) anchora gÃ¶re Ã§ok satÄ±rlÄ± metin Ã§izer.
 
-        - '\n' satır sonlarını korur.
-        - wrap_width verilirse kelime bazlı sarma uygular.
+        - '\n' satÄ±r sonlarÄ±nÄ± korur.
+        - wrap_width verilirse kelime bazlÄ± sarma uygular.
         """
         font = pygame.font.Font(None, max(12, int(font_size)))
         lines: list[str] = []
@@ -378,16 +380,16 @@ class Game:
             cy += line_h
     
     def start_game(self, game_id):
-        """Oyunu başlatır; sırayla açılış ve seviye bilgi ekranlarını uygular.
+        """Oyunu baÅŸlatÄ±r; sÄ±rayla aÃ§Ä±lÄ±ÅŸ ve seviye bilgi ekranlarÄ±nÄ± uygular.
 
-        Akış:
-        - Eğer `screens` tablosunda 'opening' varsa önce 'opening' durumunda gösterilir.
-        - Sonrasında `level_1_info` tasarımı varsa 'level_info' durumu gösterilir.
-        - Aksi halde doğrudan oynanışa geçilir.
+        AkÄ±ÅŸ:
+        - EÄŸer `screens` tablosunda 'opening' varsa Ã¶nce 'opening' durumunda gÃ¶sterilir.
+        - SonrasÄ±nda `level_1_info` tasarÄ±mÄ± varsa 'level_info' durumu gÃ¶sterilir.
+        - Aksi halde doÄŸrudan oynanÄ±ÅŸa geÃ§ilir.
         """
         self.selected_game_id = game_id
         self.game_state.reset()
-        # Açılış ekranını kontrol et
+        # AÃ§Ä±lÄ±ÅŸ ekranÄ±nÄ± kontrol et
         try:
             opening = self.db.get_screen(game_id, 'opening')
         except Exception:
@@ -397,7 +399,7 @@ class Game:
             self._prepare_opening_widgets()
             self.current_state = 'opening'
             return
-        # Bilgi ekranını kontrol et
+        # Bilgi ekranÄ±nÄ± kontrol et
         try:
             info = None
             lvl_num = 1
@@ -406,11 +408,11 @@ class Game:
                 f"level_{lvl_num}_info",
                 f"level_{lvl_id}_info" if lvl_id else None,
             ]
-            # debug log kaldırıldı
+            # debug log kaldÄ±rÄ±ldÄ±
             for name in filter(None, candidates):
                 info = self.db.get_screen(game_id, name)
                 if info and isinstance(info, dict):
-                    # debug log kaldırıldı
+                    # debug log kaldÄ±rÄ±ldÄ±
                     break
         except Exception:
             info = None
@@ -419,11 +421,11 @@ class Game:
             self._prepare_level_info_widgets()
             self.current_state = 'level_info'
             return
-        # Aksi halde doğrudan oynanışa geç
+        # Aksi halde doÄŸrudan oynanÄ±ÅŸa geÃ§
         self._start_playing(game_id)
 
     def _start_playing(self, game_id):
-        """Editördeki ayarları uygulayarak oyunu ve Level 1'i başlatır."""
+        """EditÃ¶rdeki ayarlarÄ± uygulayarak oyunu ve Level 1'i baÅŸlatÄ±r."""
         try:
             print(f"[SpriteDBG] _start_playing: game_id={game_id}")
         except Exception:
@@ -441,7 +443,7 @@ class Game:
         except Exception:
             self.level_bg_surface = None
 
-        # Ek güvenlik: Tasarlanan seviye ekranının JSON'undan arkaplanı çek
+        # Ek gÃ¼venlik: Tasarlanan seviye ekranÄ±nÄ±n JSON'undan arkaplanÄ± Ã§ek
         # (overlay bulunmasa bile arkaplan uygula)
         try:
             if self.level_bg_surface is None:
@@ -453,7 +455,7 @@ class Game:
                     (f"level_{lvl_id}_screen" if lvl_id else None),
                     (f"level_{lvl_id}" if lvl_id else None),
                 ]
-                # debug log kaldırıldı
+                # debug log kaldÄ±rÄ±ldÄ±
                 chosen_data = None
                 chosen_name = None
                 for name in filter(None, candidates):
@@ -474,7 +476,7 @@ class Game:
         except Exception:
             pass
 
-        # EARLY: Düşen nesneler için sprite regionlarından base surface'leri, spawn başlamadan hazırlayalım
+        # EARLY: DÃ¼ÅŸen nesneler iÃ§in sprite regionlarÄ±ndan base surface'leri, spawn baÅŸlamadan hazÄ±rlayalÄ±m
         try:
             self.item_base_surfaces = []
             lvl_num = self.level_manager.level
@@ -521,7 +523,7 @@ class Game:
                     except Exception:
                         pass
             print(f"[SpriteDBG] item base surfaces ready (early): {len(self.item_base_surfaces)}")
-            # Ultimate fallback: DB'de bölge yoksa, assets/images içinden direkt görselleri kullan
+            # Ultimate fallback: DB'de bÃ¶lge yoksa, assets/images iÃ§inden direkt gÃ¶rselleri kullan
             if not self.item_base_surfaces:
                 try:
                     assets_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'assets', 'images')
@@ -533,7 +535,7 @@ class Game:
                             path = os.path.join(assets_dir, fn)
                             try:
                                 img = pygame.image.load(path).convert_alpha()
-                                # Basit ölçek: ITEM_WIDTH x ITEM_HEIGHT
+                                # Basit Ã¶lÃ§ek: ITEM_WIDTH x ITEM_HEIGHT
                                 surf = pygame.transform.smoothscale(img, (ITEM_WIDTH, ITEM_HEIGHT))
                                 self.item_base_surfaces.append(surf)
                                 added += 1
@@ -561,23 +563,23 @@ class Game:
                     screen_data = self.db.get_screen(game_id, level_screen_name)
 
             if screen_data and 'level_settings' in screen_data:
-                # debug log kaldırıldı
+                # debug log kaldÄ±rÄ±ldÄ±
                 level_settings = screen_data['level_settings']
                 basket_sprite_key = level_settings.get('basket_sprite')
                 basket_length = int(level_settings.get('basket_length', 128))
-                # debug log kaldırıldı
+                # debug log kaldÄ±rÄ±ldÄ±
 
                 if basket_sprite_key:
                     region_info = self.db.get_sprite_region(basket_sprite_key)
-                    # debug log kaldırıldı
+                    # debug log kaldÄ±rÄ±ldÄ±
                     if region_info:
                         sheet_path_abs = self._abs_project_path(region_info['sheet_path'])
-                        # debug log kaldırıldı
+                        # debug log kaldÄ±rÄ±ldÄ±
                         if sheet_path_abs:
                             sheet_img = pygame.image.load(sheet_path_abs).convert_alpha()
                             region_rect = pygame.Rect(region_info['x'], region_info['y'], region_info['width'], region_info['height'])
                             self.paddle_surface = sheet_img.subsurface(region_rect).copy()
-                            # debug log kaldırıldı
+                            # debug log kaldÄ±rÄ±ldÄ±
                         else:
                             pass
                     else:
@@ -633,10 +635,10 @@ class Game:
             pass
 
     def _apply_overlay_background(self):
-        """Overlay tasarımındaki arkaplan görselini oynanış arkaplanı olarak uygular.
+        """Overlay tasarÄ±mÄ±ndaki arkaplan gÃ¶rselini oynanÄ±ÅŸ arkaplanÄ± olarak uygular.
 
-        Tasarım ekranında belirtilen `background.image` yolu mevcutsa `self.level_bg_surface`
-        buna göre set edilir. Böylece level ekranı tasarımdaki arkaplanla başlar.
+        TasarÄ±m ekranÄ±nda belirtilen `background.image` yolu mevcutsa `self.level_bg_surface`
+        buna gÃ¶re set edilir. BÃ¶ylece level ekranÄ± tasarÄ±mdaki arkaplanla baÅŸlar.
         """
         data = self.level_overlay_data or {}
         bg_rel = ((data.get('background') or {}).get('image')) or ''
@@ -649,11 +651,11 @@ class Game:
                 pass
 
     def _apply_overlay_paddle(self):
-        """Overlay widget'larından paddle için sprite türetir (opsiyonel).
+        """Overlay widget'larÄ±ndan paddle iÃ§in sprite tÃ¼retir (opsiyonel).
 
-        Editörde bir widget 'sprite' olup rolü/ismi paddle ise, ilgili sheet bölgesi ya da
-        doğrudan görselden `self.paddle_surface` üretilir.
-        Desteklenen ipuçları: widget'ta `role=='paddle'` veya `name=='paddle'` ya da `action=='paddle'`.
+        EditÃ¶rde bir widget 'sprite' olup rolÃ¼/ismi paddle ise, ilgili sheet bÃ¶lgesi ya da
+        doÄŸrudan gÃ¶rselden `self.paddle_surface` Ã¼retilir.
+        Desteklenen ipuÃ§larÄ±: widget'ta `role=='paddle'` veya `name=='paddle'` ya da `action=='paddle'`.
         """
         data = self.level_overlay_data or {}
         widgets = data.get('widgets') or []
@@ -670,7 +672,7 @@ class Game:
         if not target:
             return
         spr = target.get('sprite') or {}
-        # Öncelik: sprite sheet + frame -> doğrudan image path
+        # Ã–ncelik: sprite sheet + frame -> doÄŸrudan image path
         try:
             sprite_id = spr.get('sprite_id')
             frame = (target.get('frame') or spr.get('frame') or spr.get('region') or {})
@@ -695,7 +697,7 @@ class Game:
                     return
         except Exception:
             pass
-        # Doğrudan image
+        # DoÄŸrudan image
         try:
             img_path = str(spr.get('image') or target.get('image') or '')
             if img_path and os.path.exists(img_path):
@@ -715,15 +717,15 @@ class Game:
             pass
 
     def _apply_overlay_settings(self):
-        """Overlay tasarımındaki genel ayarları uygular.
+        """Overlay tasarÄ±mÄ±ndaki genel ayarlarÄ± uygular.
 
         Desteklenen anahtarlar (TR ve EN):
-        - HUD Sprite: yol -> UI help düğmesi
-        - Yardım Alanı / help_area: 'top-right' | 'top-left'
-        - Doğru SFX / sfx_correct, Yanlış SFX / sfx_wrong: ses dosya yolları
+        - HUD Sprite: yol -> UI help dÃ¼ÄŸmesi
+        - YardÄ±m AlanÄ± / help_area: 'top-right' | 'top-left'
+        - DoÄŸru SFX / sfx_correct, YanlÄ±ÅŸ SFX / sfx_wrong: ses dosya yollarÄ±
         """
         data = self.level_overlay_data or {}
-        # Hem 'settings' hem de 'level_settings' kaynaklarını birleştir
+        # Hem 'settings' hem de 'level_settings' kaynaklarÄ±nÄ± birleÅŸtir
         settings_map = {}
         try:
             base_settings = data.get('settings') or {}
@@ -744,7 +746,7 @@ class Game:
             pass
         # Help area
         help_area = (
-            settings_map.get('Yardım Alanı')
+            settings_map.get('YardÄ±m AlanÄ±')
             or settings_map.get('help_area')
             or settings_map.get('help')
         )
@@ -754,8 +756,8 @@ class Game:
         except Exception:
             pass
         # SFX load
-        corr = settings_map.get('Doğru SFX') or settings_map.get('sfx_correct')
-        wrong = settings_map.get('Yanlış SFX') or settings_map.get('sfx_wrong')
+        corr = settings_map.get('DoÄŸru SFX') or settings_map.get('sfx_correct')
+        wrong = settings_map.get('YanlÄ±ÅŸ SFX') or settings_map.get('sfx_wrong')
         try:
             if corr and os.path.exists(corr):
                 if not pygame.mixer.get_init():
@@ -770,9 +772,9 @@ class Game:
                 self.sfx_wrong = pygame.mixer.Sound(wrong)
         except Exception:
             self.sfx_wrong = None
-        # Paddle length (Sepet Uzunluğu)
+        # Paddle length (Sepet UzunluÄŸu)
         try:
-            paddle_len = settings_map.get('Sepet Uzunluğu') or settings_map.get('paddle_length') or settings_map.get('basket_length')
+            paddle_len = settings_map.get('Sepet UzunluÄŸu') or settings_map.get('paddle_length') or settings_map.get('basket_length')
             if paddle_len:
                 settings.PLAYER_WIDTH = int(paddle_len)
         except Exception:
@@ -781,9 +783,9 @@ class Game:
         try:
             paddle_path_raw = settings_map.get('Sepet Sprite') or settings_map.get('paddle_sprite') or settings_map.get('basket_sprite')
             if paddle_path_raw and isinstance(paddle_path_raw, str):
-                # Editör formatı: "mor — assets/images/buttons.png"
-                if ' — ' in paddle_path_raw:
-                    paddle_path = paddle_path_raw.split(' — ', 1)[-1].strip()
+                # EditÃ¶r formatÄ±: "mor â€” assets/images/buttons.png"
+                if ' â€” ' in paddle_path_raw:
+                    paddle_path = paddle_path_raw.split(' â€” ', 1)[-1].strip()
                 else:
                     paddle_path = paddle_path_raw
 
@@ -800,7 +802,7 @@ class Game:
             pass
         # Music override from overlay
         try:
-            music_path = settings_map.get('Müzik') or settings_map.get('music')
+            music_path = settings_map.get('MÃ¼zik') or settings_map.get('music')
             if music_path and os.path.exists(music_path):
                 if not pygame.mixer.get_init():
                     pygame.mixer.init()
@@ -819,8 +821,8 @@ class Game:
         except Exception:
             pass
 
-        # Level oynanış ekranı için tasarım overlay'ini yükle (opsiyonel)
-        # Olası isimler (her iki şema):
+        # Level oynanÄ±ÅŸ ekranÄ± iÃ§in tasarÄ±m overlay'ini yÃ¼kle (opsiyonel)
+        # OlasÄ± isimler (her iki ÅŸema):
         # - level_<num>_screen, level_<num>_play, level_<num>
         # - level_<id>_screen,  level_<id>_play,  level_<id>
         self.level_overlay_data = None
@@ -836,37 +838,37 @@ class Game:
                 (f"level_{lvl_id}" if lvl_id else None),
                 "playing",
             ]
-            # debug log kaldırıldı
+            # debug log kaldÄ±rÄ±ldÄ±
             for name in filter(None, candidate_names):
                 data = self.db.get_screen(game_id, name)
                 if data and isinstance(data, dict):
                     self.level_overlay_data = data
-                    # debug log kaldırıldı
+                    # debug log kaldÄ±rÄ±ldÄ±
                     break
         except Exception:
             self.level_overlay_data = None
-        # Overlay butonlarını hazırla
+        # Overlay butonlarÄ±nÄ± hazÄ±rla
         try:
             self._prepare_overlay_widgets()
         except Exception:
             self.level_overlay_buttons = []
-        # Overlay'deki arkaplanı level oynanışına uygula (varsa)
+        # Overlay'deki arkaplanÄ± level oynanÄ±ÅŸÄ±na uygula (varsa)
         try:
             self._apply_overlay_background()
         except Exception:
             pass
-        # Overlay'den paddle sprite'ı türet (opsiyonel)
+        # Overlay'den paddle sprite'Ä± tÃ¼ret (opsiyonel)
         try:
             self._apply_overlay_paddle()
         except Exception:
             pass
-        # Overlay genel ayarlarını uygula (HUD sprite, help area, SFX)
+        # Overlay genel ayarlarÄ±nÄ± uygula (HUD sprite, help area, SFX)
         try:
             self._apply_overlay_settings()
         except Exception:
             pass
 
-        # Düşen nesneler için sprite regionlarından base surface'leri hazırla
+        # DÃ¼ÅŸen nesneler iÃ§in sprite regionlarÄ±ndan base surface'leri hazÄ±rla
         try:
             self.item_base_surfaces = []
             lvl_num = self.level_manager.level
@@ -904,7 +906,7 @@ class Game:
 
             if lvl_id:
                 count = _load_item_surfaces_for_level(lvl_id)
-                # Eğer mevcut level'da yoksa, oyun içi deneyim için diğer level'lara bak
+                # EÄŸer mevcut level'da yoksa, oyun iÃ§i deneyim iÃ§in diÄŸer level'lara bak
                 if count == 0:
                     print("[SpriteDBG] no item regions for current level; searching other levels with regions...")
                     try:
@@ -913,11 +915,11 @@ class Game:
                             other_id = int(row.get('id'))
                             if other_id == lvl_id:
                                 continue
-                            # Geçici listeyi temizlemeden deneyelim; sadece ilk bulunanı kullan
+                            # GeÃ§ici listeyi temizlemeden deneyelim; sadece ilk bulunanÄ± kullan
                             prev_len = len(self.item_base_surfaces)
                             found = _load_item_surfaces_for_level(other_id)
                             if found > prev_len:
-                                # Bu level'ı aktif yap (numarasına geç)
+                                # Bu level'Ä± aktif yap (numarasÄ±na geÃ§)
                                 try:
                                     self.level_manager.setup_level(int(row.get('level_number', 1)), game_id)
                                     print(f"[SpriteDBG] switched to level_number={row.get('level_number')} having item regions")
@@ -934,7 +936,7 @@ class Game:
             self.item_base_surfaces = []
 
     def _prepare_level_info_widgets(self):
-        """Editor JSON'undan buton bölgelerini ve aksiyonlarını çıkarır."""
+        """Editor JSON'undan buton bÃ¶lgelerini ve aksiyonlarÄ±nÄ± Ã§Ä±karÄ±r."""
         self.level_info_buttons = []
         data = self.level_info_data or {}
         widgets = data.get('widgets') or []
@@ -942,7 +944,7 @@ class Game:
             try:
                 if w.get('type') == 'button':
                     x = int(w.get('x', 0)); y = int(w.get('y', 0))
-                    # ölçüler sprite.frame ya da varsayılan üzerinden
+                    # Ã¶lÃ§Ã¼ler sprite.frame ya da varsayÄ±lan Ã¼zerinden
                     fw = int(((w.get('sprite') or {}).get('frame') or {}).get('width', 180))
                     fh = int(((w.get('sprite') or {}).get('frame') or {}).get('height', 48))
                     rect = pygame.Rect(x, y, max(1, fw), max(1, fh))
@@ -953,7 +955,7 @@ class Game:
                 continue
 
     def _prepare_opening_widgets(self):
-        """Opening ekranı için buton bölgelerini ve aksiyonlarını hazırlar."""
+        """Opening ekranÄ± iÃ§in buton bÃ¶lgelerini ve aksiyonlarÄ±nÄ± hazÄ±rlar."""
         self.opening_buttons = []
         data = self.opening_data or {}
         widgets = data.get('widgets') or []
@@ -965,23 +967,23 @@ class Game:
                     fh = int(((w.get('sprite') or {}).get('frame') or {}).get('height', 54))
                     rect = pygame.Rect(x, y, max(1, fw), max(1, fh))
                     action = str(w.get('action') or 'start_game')
-                    text = str(((w.get('text_overlay') or {}).get('text')) or 'Başla')
+                    text = str(((w.get('text_overlay') or {}).get('text')) or 'BaÅŸla')
                     self.opening_buttons.append({'rect': rect, 'action': action, 'text': text})
             except Exception:
                 continue
 
     def _render_designed_screen(self, data: dict | None, bg_surface: pygame.Surface | None = None, draw_background: bool = True):
-        """Editor ile tasarlanan ekranları (opening/level_info vb.) ortak biçimde çizer.
+        """Editor ile tasarlanan ekranlarÄ± (opening/level_info vb.) ortak biÃ§imde Ã§izer.
 
-        Davranış:
-        - Arkaplan önceliği (draw_background True ise): data.background.image -> bg_surface -> mesh arkaplan.
-        - Widget türleri: label, sprite/image, button.
-        - Label ve Button metinleri üst katmanda, hafif gölgeli çizilir.
+        DavranÄ±ÅŸ:
+        - Arkaplan Ã¶nceliÄŸi (draw_background True ise): data.background.image -> bg_surface -> mesh arkaplan.
+        - Widget tÃ¼rleri: label, sprite/image, button.
+        - Label ve Button metinleri Ã¼st katmanda, hafif gÃ¶lgeli Ã§izilir.
 
         Args:
             data: Ekran JSON verisi (editor "screens" tablosundan).
-            bg_surface: Varsa oyun/level özel arkaplan yüzeyi.
-            draw_background: False ise sadece widget'ları çizer (oynanış üstü overlay).
+            bg_surface: Varsa oyun/level Ã¶zel arkaplan yÃ¼zeyi.
+            draw_background: False ise sadece widget'larÄ± Ã§izer (oynanÄ±ÅŸ Ã¼stÃ¼ overlay).
         """
         data = data or {}
         # Arkaplan
@@ -1126,9 +1128,9 @@ class Game:
                     if not drawn:
                         pygame.draw.rect(self.screen, (70, 130, 180), rect, border_radius=12)
                         pygame.draw.rect(self.screen, (40, 80, 120), rect, width=2, border_radius=12)
-                    # Metin overlay (erteleyerek üst katmanda)
+                    # Metin overlay (erteleyerek Ã¼st katmanda)
                     txt_cfg = (w.get('text_overlay') or {})
-                    txt = str(txt_cfg.get('text') or w.get('text') or 'Başla')
+                    txt = str(txt_cfg.get('text') or w.get('text') or 'BaÅŸla')
                     try:
                         txt_color = pygame.Color(txt_cfg.get('color') or '#FFFFFF')
                     except Exception:
@@ -1150,7 +1152,7 @@ class Game:
                 _draw_text(self.screen, txt, txt_size, cx, cy, txt_color)
 
     def update(self):
-        """Oyun durumunu günceller; oynanış harici durumlarda erken döner."""
+        """Oyun durumunu gÃ¼nceller; oynanÄ±ÅŸ harici durumlarda erken dÃ¶ner."""
         if self.current_state != 'playing':
             return
             
@@ -1178,9 +1180,9 @@ class Game:
         elif self.current_state == 'level_info':
             self._render_designed_screen(self.level_info_data, self.per_game_bg_surface)
         elif self.current_state == 'playing':
-            # Önce gerçek oyun (sepet, düşen nesneler, HUD)
+            # Ã–nce gerÃ§ek oyun (sepet, dÃ¼ÅŸen nesneler, HUD)
             draw_playing_screen(self.screen, self.game_state, self.level_manager, self.ui_manager, self.effect_manager, self.level_bgs, self.level_bg_surface)
-            # Ardından tasarım overlay'i (sadece widget'lar), arkaplanı yeniden çizme
+            # ArdÄ±ndan tasarÄ±m overlay'i (sadece widget'lar), arkaplanÄ± yeniden Ã§izme
             if isinstance(self.level_overlay_data, dict):
                 self._render_designed_screen(self.level_overlay_data, None, draw_background=False)
         elif self.current_state == 'level_up':
@@ -1193,13 +1195,13 @@ class Game:
     
     # Methods from main.py that are now part of the Game class
     def handle_item_spawning(self):
-        """Nesne doğurma akışını yönetir ve eşzamanlı nesne sınırına uyar."""
-        # Hazır event yoksa üret
+        """Nesne doÄŸurma akÄ±ÅŸÄ±nÄ± yÃ¶netir ve eÅŸzamanlÄ± nesne sÄ±nÄ±rÄ±na uyar."""
+        # HazÄ±r event yoksa Ã¼ret
         if self.level_manager.spawn_index >= len(self.level_manager.spawn_events) and not self.level_manager.is_level_complete():
-            # min/max adetleri makul tut; LevelManager içeriden kalan doğru öğeleri ekler
+            # min/max adetleri makul tut; LevelManager iÃ§eriden kalan doÄŸru Ã¶ÄŸeleri ekler
             self.level_manager.prepare_spawn_events(min_items=2, max_items=5)
 
-        # Ekranda çok fazla nesne varsa bekle
+        # Ekranda Ã§ok fazla nesne varsa bekle
         try:
             active_items = len(self.game_state.items)
             if active_items >= max(1, int(getattr(self.level_manager, 'max_items_on_screen', 5))):
@@ -1214,8 +1216,8 @@ class Game:
             self.spawn_item(item_text, item_category)
 
     def spawn_item(self, text, category):
-        """Yeni bir düşen nesne oluşturur ve hızını ayarlardan uygular."""
-        # Mevcut ise seviye sprite base yüzeylerinden birini kullan
+        """Yeni bir dÃ¼ÅŸen nesne oluÅŸturur ve hÄ±zÄ±nÄ± ayarlardan uygular."""
+        # Mevcut ise seviye sprite base yÃ¼zeylerinden birini kullan
         base = None
         try:
             pool_len = len(self.item_base_surfaces) if isinstance(getattr(self, 'item_base_surfaces', None), list) else 0
@@ -1228,7 +1230,7 @@ class Game:
             base = None
         item = Item(text, category, base_surface=base)
         print(f"[SpriteDBG] spawn_item: base_surface={base is not None} text='{text}' category='{category}'")
-        # Hız ayarı: game settings üzerinden gelen değer
+        # HÄ±z ayarÄ±: game settings Ã¼zerinden gelen deÄŸer
         try:
             speed = float(getattr(self.level_manager, 'item_speed', 3.0))
             if speed > 0:
@@ -1250,8 +1252,21 @@ class Game:
                 points = 5 if self.game_state.help_mode else 10
                 self.game_state.score += points
                 self.level_manager.caught_correct.append(hit.text)
-                self.effect_manager.trigger_confetti(self.game_state.player.rect.centerx, self.game_state.player.rect.centery)
-                # Tasarımdan gelen doğru SFX
+                # Ã–nce sprite-sheet efekti dene; yoksa confetti'ye dÃ¼ÅŸ
+                played = False
+                try:
+                    if self.effect_sheet_correct_path:
+                        played = self.effect_manager.trigger_sprite_sheet(
+                            self.effect_sheet_correct_path,
+                            self.game_state.player.rect.centerx,
+                            self.game_state.player.rect.centery,
+                            cols=6, rows=5, scale=1.25, fps=24
+                        )
+                except Exception:
+                    played = False
+                if not played:
+                    self.effect_manager.trigger_confetti(self.game_state.player.rect.centerx, self.game_state.player.rect.centery)
+                # TasarÄ±mdan gelen doÄŸru SFX
                 try:
                     if self.sfx_correct:
                         self.sfx_correct.play()
@@ -1260,8 +1275,21 @@ class Game:
             else:
                 if self.game_state.lose_life(reason="caught_wrong_item"):
                     return 'game_over'
-                self.effect_manager.trigger_sad_effect(self.game_state.player.rect.centerx, self.game_state.player.rect.centery)
-                # Tasarımdan gelen yanlış SFX
+                # Ã–nce yanlÄ±ÅŸ iÃ§in sprite-sheet dene; yoksa sad efektine dÃ¼ÅŸ
+                played = False
+                try:
+                    if self.effect_sheet_wrong_path:
+                        played = self.effect_manager.trigger_sprite_sheet(
+                            self.effect_sheet_wrong_path,
+                            self.game_state.player.rect.centerx,
+                            self.game_state.player.rect.centery,
+                            cols=6, rows=5, scale=1.25, fps=24
+                        )
+                except Exception:
+                    played = False
+                if not played:
+                    self.effect_manager.trigger_sad_effect(self.game_state.player.rect.centerx, self.game_state.player.rect.centery)
+                # TasarÄ±mdan gelen yanlÄ±ÅŸ SFX
                 try:
                     if self.sfx_wrong:
                         self.sfx_wrong.play()
@@ -1275,3 +1303,6 @@ class Game:
                 if item.item_type == self.level_manager.target_category:
                     self.level_manager.level_queue.append(item.text)
                 item.kill()
+
+
+

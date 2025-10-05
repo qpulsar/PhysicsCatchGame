@@ -5,7 +5,8 @@ including confetti and sad effects.
 """
 
 import random
-from typing import List, Optional, Tuple
+import os
+from typing import List, Optional, Tuple, Dict
 
 import pygame
 
@@ -112,6 +113,50 @@ class EffectManager:
         self.sad_effect: Optional[SadEffect] = None
         self.confetti_timer: int = 0
         self.sad_timer: int = 0
+        # Sprite-sheet effect state
+        self._sheet_cache: Dict[str, pygame.Surface] = {}
+        self._active_sheet_anims: List["_SheetAnimState"] = []
+
+    class _SheetAnimState:
+        """Internal runtime for a sprite-sheet animation.
+
+        Assumes a fixed grid (cols x rows). Advances frames every `frame_duration` ms.
+        """
+        def __init__(self, sheet: pygame.Surface, cols: int, rows: int, x: float, y: float, scale: float = 1.0, fps: int = 24):
+            self.sheet = sheet
+            self.cols = max(1, cols)
+            self.rows = max(1, rows)
+            self.x = x
+            self.y = y
+            self.scale = max(0.1, scale)
+            self.fps = max(1, fps)
+            self.frame_duration = int(1000 / self.fps)
+            self.frame_w = sheet.get_width() // self.cols
+            self.frame_h = sheet.get_height() // self.rows
+            self.total_frames = self.cols * self.rows
+            self.current = 0
+            self.last_tick = pygame.time.get_ticks()
+
+        def update(self) -> bool:
+            now = pygame.time.get_ticks()
+            if now - self.last_tick >= self.frame_duration:
+                self.current += 1
+                self.last_tick = now
+            return self.current < self.total_frames
+
+        def draw(self, surface: pygame.Surface) -> None:
+            if self.current >= self.total_frames:
+                return
+            col = self.current % self.cols
+            row = self.current // self.cols
+            src = pygame.Rect(col * self.frame_w, row * self.frame_h, self.frame_w, self.frame_h)
+            frame = self.sheet.subsurface(src)
+            if self.scale != 1.0:
+                w = max(1, int(self.frame_w * self.scale))
+                h = max(1, int(self.frame_h * self.scale))
+                frame = pygame.transform.smoothscale(frame, (w, h))
+            rect = frame.get_rect(center=(int(self.x), int(self.y)))
+            surface.blit(frame, rect)
     
     def trigger_confetti(self, x: float, y: float, count: int = 40) -> None:
         """Trigger a confetti effect at the specified position.
@@ -138,6 +183,7 @@ class EffectManager:
         """Update all active effects."""
         self._update_confetti()
         self._update_sad_effect()
+        self._update_sheet_anims()
     
     def _update_confetti(self) -> None:
         """Update the confetti effect."""
@@ -165,6 +211,7 @@ class EffectManager:
         """
         self._draw_confetti(surface)
         self._draw_sad_effect(surface)
+        self._draw_sheet_anims(surface)
     
     def _draw_confetti(self, surface: pygame.Surface) -> None:
         """Draw all confetti particles."""
@@ -182,3 +229,44 @@ class EffectManager:
         self.sad_effect = None
         self.confetti_timer = 0
         self.sad_timer = 0
+        self._active_sheet_anims.clear()
+
+    # --- Sprite sheet public API ---
+    def trigger_sprite_sheet(self, sheet_path: str, x: float, y: float, *, cols: int = 6, rows: int = 5, scale: float = 1.0, fps: int = 24) -> bool:
+        """Trigger a sprite-sheet animation at (x,y).
+
+        Returns True if started, False on failure.
+        """
+        try:
+            if not sheet_path:
+                return False
+            sheet = self._sheet_cache.get(sheet_path)
+            if sheet is None:
+                if not os.path.exists(sheet_path):
+                    return False
+                img = pygame.image.load(sheet_path).convert_alpha()
+                self._sheet_cache[sheet_path] = img
+                sheet = img
+            anim = self._SheetAnimState(sheet, cols, rows, x, y, scale=scale, fps=fps)
+            self._active_sheet_anims.append(anim)
+            return True
+        except Exception:
+            return False
+
+    # --- Sprite sheet internals ---
+    def _update_sheet_anims(self) -> None:
+        alive: List[EffectManager._SheetAnimState] = []
+        for anim in self._active_sheet_anims:
+            try:
+                if anim.update():
+                    alive.append(anim)
+            except Exception:
+                continue
+        self._active_sheet_anims = alive
+
+    def _draw_sheet_anims(self, surface: pygame.Surface) -> None:
+        for anim in self._active_sheet_anims:
+            try:
+                anim.draw(surface)
+            except Exception:
+                continue
