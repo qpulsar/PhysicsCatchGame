@@ -73,6 +73,9 @@ class DatabaseManager:
             FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE,
             UNIQUE (game_id, level_number)
         )''')
+
+        # Ensure new effect-related columns exist on levels (idempotent migration)
+        self._ensure_levels_effect_columns(cursor)
         
         # Create expressions table
         cursor.execute('''
@@ -206,6 +209,36 @@ class DatabaseManager:
                 ORDER BY level_number
             ''', (game_id,))
             return cursor.fetchall()
+
+    def _ensure_levels_effect_columns(self, cursor: sqlite3.Cursor) -> None:
+        """Ensure additional effect-related columns exist on the levels table.
+
+        Columns added:
+        - effect_correct_sheet TEXT
+        - effect_wrong_sheet TEXT
+        - effect_fps INTEGER DEFAULT 30
+        - effect_scale_percent INTEGER DEFAULT 60
+
+        This method is safe to call repeatedly; it inspects existing columns
+        via PRAGMA and only issues ALTER TABLE statements for missing ones.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(levels)")
+            cols = {row[1] for row in cursor.fetchall()}  # row[1] is name
+            alters = []
+            if 'effect_correct_sheet' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_correct_sheet TEXT")
+            if 'effect_wrong_sheet' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_wrong_sheet TEXT")
+            if 'effect_fps' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_fps INTEGER DEFAULT 30")
+            if 'effect_scale_percent' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_scale_percent INTEGER DEFAULT 60")
+            for sql in alters:
+                cursor.execute(sql)
+        except Exception:
+            # Non-fatal: keep initialization going even if ALTER fails
+            pass
     
     def get_level(self, level_id: int) -> Optional[sqlite3.Row]:
         """Get a level by ID."""

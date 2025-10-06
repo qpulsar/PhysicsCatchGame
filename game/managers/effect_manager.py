@@ -122,7 +122,7 @@ class EffectManager:
 
         Assumes a fixed grid (cols x rows). Advances frames every `frame_duration` ms.
         """
-        def __init__(self, sheet: pygame.Surface, cols: int, rows: int, x: float, y: float, scale: float = 1.0, fps: int = 24):
+        def __init__(self, sheet: pygame.Surface, cols: int, rows: int, x: float, y: float, scale: float = 1.0, fps: int = 24, *, follow_rect: Optional[pygame.Rect] = None, offset: Tuple[int, int] | None = None):
             self.sheet = sheet
             self.cols = max(1, cols)
             self.rows = max(1, rows)
@@ -136,6 +136,9 @@ class EffectManager:
             self.total_frames = self.cols * self.rows
             self.current = 0
             self.last_tick = pygame.time.get_ticks()
+            # Follow target
+            self.follow_rect: Optional[pygame.Rect] = follow_rect
+            self.offset: Tuple[int, int] = offset if offset is not None else (0, 0)
 
         def update(self) -> bool:
             now = pygame.time.get_ticks()
@@ -155,7 +158,11 @@ class EffectManager:
                 w = max(1, int(self.frame_w * self.scale))
                 h = max(1, int(self.frame_h * self.scale))
                 frame = pygame.transform.smoothscale(frame, (w, h))
-            rect = frame.get_rect(center=(int(self.x), int(self.y)))
+            if self.follow_rect is not None:
+                cx, cy = self.follow_rect.centerx + int(self.offset[0]), self.follow_rect.centery + int(self.offset[1])
+            else:
+                cx, cy = int(self.x), int(self.y)
+            rect = frame.get_rect(center=(int(cx), int(cy)))
             surface.blit(frame, rect)
     
     def trigger_confetti(self, x: float, y: float, count: int = 40) -> None:
@@ -232,10 +239,20 @@ class EffectManager:
         self._active_sheet_anims.clear()
 
     # --- Sprite sheet public API ---
-    def trigger_sprite_sheet(self, sheet_path: str, x: float, y: float, *, cols: int = 6, rows: int = 5, scale: float = 1.0, fps: int = 24) -> bool:
-        """Trigger a sprite-sheet animation at (x,y).
+    def trigger_sprite_sheet(self, sheet_path: str, x: float, y: float, *, cols: int = 6, rows: int = 5, scale: float = 1.0, fps: int = 24, follow_rect: Optional[pygame.Rect] = None, offset: Tuple[int, int] | None = None) -> bool:
+        """Trigger a sprite-sheet animation.
 
-        Returns True if started, False on failure.
+        Args:
+            sheet_path: Yüklenecek sprite-sheet yolu.
+            x, y: Başlangıç koordinatı (follow_rect verilirse başlangıç için kullanılır, sonraki karelerde takip geçerlidir).
+            cols, rows: Grid boyutları (varsayılan 6x5).
+            scale: Ölçek katsayısı.
+            fps: Kare hızı.
+            follow_rect: Verilirse animasyon her karede bu dikdörtgenin merkezini takip eder.
+            offset: Takip modunda merkeze eklenecek (dx, dy) ofseti.
+
+        Returns:
+            bool: Başlatıldıysa True, aksi halde False.
         """
         try:
             if not sheet_path:
@@ -247,12 +264,29 @@ class EffectManager:
                 img = pygame.image.load(sheet_path).convert_alpha()
                 self._sheet_cache[sheet_path] = img
                 sheet = img
-            anim = self._SheetAnimState(sheet, cols, rows, x, y, scale=scale, fps=fps)
+            anim = self._SheetAnimState(sheet, cols, rows, x, y, scale=scale, fps=fps, follow_rect=follow_rect, offset=offset)
             self._active_sheet_anims.append(anim)
             return True
         except Exception:
             return False
 
+    def preload_sheet(self, sheet_path: str) -> bool:
+        """Preload a sprite sheet into cache if exists.
+
+        Returns True on success or already cached; False on failure.
+        """
+        try:
+            if not sheet_path:
+                return False
+            if sheet_path in self._sheet_cache:
+                return True
+            if not os.path.exists(sheet_path):
+                return False
+            img = pygame.image.load(sheet_path).convert_alpha()
+            self._sheet_cache[sheet_path] = img
+            return True
+        except Exception:
+            return False
     # --- Sprite sheet internals ---
     def _update_sheet_anims(self) -> None:
         alive: List[EffectManager._SheetAnimState] = []

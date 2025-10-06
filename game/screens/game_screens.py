@@ -90,6 +90,36 @@ class Database:
             print(f"Database error: {e}")
             return []
 
+    def get_level_effect_settings(self, level_id: int) -> dict:
+        """Read effect settings columns from levels table if present.
+
+        Returns keys only if available in schema and non-null: 
+        - effect_correct_sheet, effect_wrong_sheet, effect_fps, effect_scale_percent
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                # Check columns existence via PRAGMA to avoid SQL errors on older DBs
+                cursor.execute('PRAGMA table_info(levels)')
+                cols = {row[1] for row in cursor.fetchall()}
+                wanted = ['effect_correct_sheet','effect_wrong_sheet','effect_fps','effect_scale_percent']
+                if not any(k in cols for k in wanted):
+                    return {}
+                select_cols = ', '.join([k for k in wanted if k in cols])
+                cursor.execute(f'SELECT {select_cols} FROM levels WHERE id = ?', (level_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return {}
+                out = {}
+                for k in wanted:
+                    if k in row.keys() and row[k] is not None and row[k] != '':
+                        out[k] = row[k]
+                return out
+        except sqlite3.Error as e:
+            print(f"Database error get_level_effect_settings: {e}")
+            return {}
+
     def get_game_settings(self, game_id: int) -> dict:
         """Get settings key/value for a specific game."""
         try:

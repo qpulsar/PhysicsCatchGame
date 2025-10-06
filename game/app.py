@@ -1,4 +1,4 @@
-﻿import pygame
+import pygame
 import sys
 import subprocess
 import os
@@ -40,7 +40,12 @@ class Game:
         self.sfx_wrong = None
         # Tasarım kaynaklı sprite-sheet efekt yolları (6x5 grid varsayılan)
         self.effect_sheet_correct_path = None
-        self.effect_sheet_wrong_path = None        # Designed level-info screen state
+        self.effect_sheet_wrong_path = None
+        # Efekt çalışma zamanı parametreleri
+        self.effect_sheet_correct_scale = 1.25
+        self.effect_sheet_wrong_scale = 1.25
+        self.effect_sheet_fps = 24
+        # Designed level-info screen state
         self.level_info_data = None  # parsed JSON from editor
         self.level_info_buttons = []  # list of {rect, action, text}
         # Opening screen state (from editor)
@@ -568,6 +573,83 @@ class Game:
                 basket_sprite_key = level_settings.get('basket_sprite')
                 basket_length = int(level_settings.get('basket_length', 128))
                 # debug log kaldÄ±rÄ±ldÄ±
+
+                # Screen Designer: efekt sheetleri ve parametreleri (6x5)
+                try:
+                    ok_rel = str(level_settings.get('effect_correct_sheet') or '').strip()
+                    bad_rel = str(level_settings.get('effect_wrong_sheet') or '').strip()
+                    fps_val = int(level_settings.get('effect_fps', 24) or 24)
+                    scale_pct = int(level_settings.get('effect_scale_percent', 60) or 60)
+                    fps_val = max(5, min(60, fps_val))
+                    scale_pct = max(10, min(200, scale_pct))
+                except Exception:
+                    ok_rel = ''
+                    bad_rel = ''
+                    fps_val = 24
+                    scale_pct = 60
+
+                # DB'deki seviye kolonları varsa JSON'un üzerine yaz
+                try:
+                    lvl_id_for_effects = self._resolve_level_id(game_id, self.level_manager.level)
+                    if lvl_id_for_effects:
+                        eff_cols = self.db.get_level_effect_settings(lvl_id_for_effects)
+                        if eff_cols:
+                            if 'effect_correct_sheet' in eff_cols:
+                                ok_rel = str(eff_cols.get('effect_correct_sheet') or ok_rel)
+                            if 'effect_wrong_sheet' in eff_cols:
+                                bad_rel = str(eff_cols.get('effect_wrong_sheet') or bad_rel)
+                            if 'effect_fps' in eff_cols:
+                                try:
+                                    fps_val = int(eff_cols.get('effect_fps'))
+                                    fps_val = max(5, min(60, fps_val))
+                                except Exception:
+                                    pass
+                            if 'effect_scale_percent' in eff_cols:
+                                try:
+                                    scale_pct = int(eff_cols.get('effect_scale_percent'))
+                                    scale_pct = max(10, min(200, scale_pct))
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+                # Mutlak yolları çöz
+                ok_abs = self._abs_project_path(ok_rel) if ok_rel else None
+                bad_abs = self._abs_project_path(bad_rel) if bad_rel else None
+                if ok_abs and os.path.exists(ok_abs):
+                    self.effect_sheet_correct_path = ok_abs
+                else:
+                    self.effect_sheet_correct_path = None
+                if bad_abs and os.path.exists(bad_abs):
+                    self.effect_sheet_wrong_path = bad_abs
+                else:
+                    self.effect_sheet_wrong_path = None
+
+                self.effect_sheet_fps = fps_val
+
+                # Ölçek hesapla: hedef genişlik = basket_length * (scale_pct/100)
+                def _calc_scale(sheet_path: str | None) -> float:
+                    try:
+                        if not sheet_path or not os.path.exists(sheet_path):
+                            return 1.25
+                        img = pygame.image.load(sheet_path).convert_alpha()
+                        frame_w = max(1, img.get_width() // 6)
+                        target_w = max(16, int(basket_length * scale_pct / 100.0))
+                        return max(0.1, target_w / float(frame_w))
+                    except Exception:
+                        return 1.25
+
+                self.effect_sheet_correct_scale = _calc_scale(self.effect_sheet_correct_path)
+                self.effect_sheet_wrong_scale = _calc_scale(self.effect_sheet_wrong_path)
+
+                # Ön-yükleme: ilk tetiklemede gecikmeyi azalt
+                try:
+                    if self.effect_sheet_correct_path:
+                        self.effect_manager.preload_sheet(self.effect_sheet_correct_path)
+                    if self.effect_sheet_wrong_path:
+                        self.effect_manager.preload_sheet(self.effect_sheet_wrong_path)
+                except Exception:
+                    pass
 
                 if basket_sprite_key:
                     region_info = self.db.get_sprite_region(basket_sprite_key)
@@ -1256,11 +1338,17 @@ class Game:
                 played = False
                 try:
                     if self.effect_sheet_correct_path:
+                        cx = self.game_state.player.rect.centerx
+                        cy = self.game_state.player.rect.centery - max(2, int(self.game_state.player.rect.height * 0.25))
                         played = self.effect_manager.trigger_sprite_sheet(
                             self.effect_sheet_correct_path,
-                            self.game_state.player.rect.centerx,
-                            self.game_state.player.rect.centery,
-                            cols=6, rows=5, scale=1.25, fps=24
+                            cx,
+                            cy,
+                            cols=6, rows=5,
+                            scale=self.effect_sheet_correct_scale,
+                            fps=self.effect_sheet_fps,
+                            follow_rect=self.game_state.player.rect,
+                            offset=(0, -max(2, int(self.game_state.player.rect.height * 0.25)))
                         )
                 except Exception:
                     played = False
@@ -1279,11 +1367,17 @@ class Game:
                 played = False
                 try:
                     if self.effect_sheet_wrong_path:
+                        cx = self.game_state.player.rect.centerx
+                        cy = self.game_state.player.rect.centery - max(2, int(self.game_state.player.rect.height * 0.25))
                         played = self.effect_manager.trigger_sprite_sheet(
                             self.effect_sheet_wrong_path,
-                            self.game_state.player.rect.centerx,
-                            self.game_state.player.rect.centery,
-                            cols=6, rows=5, scale=1.25, fps=24
+                            cx,
+                            cy,
+                            cols=6, rows=5,
+                            scale=self.effect_sheet_wrong_scale,
+                            fps=self.effect_sheet_fps,
+                            follow_rect=self.game_state.player.rect,
+                            offset=(0, -max(2, int(self.game_state.player.rect.height * 0.25)))
                         )
                 except Exception:
                     played = False
