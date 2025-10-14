@@ -116,8 +116,8 @@ class SpritesTab:
         pane.rowconfigure(0, weight=1)
         pane.columnconfigure(0, weight=1)
 
-        # Assets Image List
-        list_frame = ttk.LabelFrame(pane, text="Görseller (assets)", padding=5)
+        # Assets Image List (restricted to assets/images/sprites)
+        list_frame = ttk.LabelFrame(pane, text="Görseller (assets/images/sprites)", padding=5)
         list_frame.grid(row=0, column=0, sticky="nsew", pady=5)
         list_frame.rowconfigure(0, weight=1)
         list_frame.columnconfigure(0, weight=1)
@@ -134,6 +134,7 @@ class SpritesTab:
         # Debug & refresh controls
         ttk.Button(button_frame, text="Yenile", command=self.refresh).pack(side=tk.RIGHT)
         ttk.Button(button_frame, text="Debug: Sprite Kontrol", command=self._debug_regions_check).pack(side=tk.RIGHT, padx=(0,6))
+        ttk.Button(button_frame, text="Otomatik Tespit", command=self._auto_detect_buttons).pack(side=tk.RIGHT, padx=(0,6))
         
         # Regions management
         regions_frame = ttk.LabelFrame(pane, text="Sprite Bölgeleri", padding=5)
@@ -262,6 +263,449 @@ class SpritesTab:
             finally:
                 self._refresh_regions_list()
 
+    def _auto_detect_buttons(self) -> None:
+        """Seçili görselde yatay dizilmiş butonları otomatik tespit eder ve kaydetmeden önce kullanıcıya inceletir.
+
+        Akış:
+        - Seçili görseli alır (soldaki liste).
+        - Kullanıcıdan kök ad (örn. "buton") ve buton sayısı (varsayılan 10) ister.
+        - Görseli N eşit dilime böler, her dilimde alfa kanalından bbox çıkarır.
+        - Kullanıcının ilk kabul/editle ettiği bölgeyi REFERANS kabul eder.
+        - Sonraki bölgelerde, referansın yüksekliği ve dikey hizasını koruyarak,
+          segment veya alfa merkezine göre kutuyu yatayda konumlandırır (rehberli tespit).
+        - Her öneri için önizleme penceresi açar: Kabul, Editle (Cropper), Atla.
+        - Kabul veya editle sonrası `sprite_service.upsert_sprite_region` ile kaydeder ve sıralı ad verir.
+        """
+        try:
+            selection = self.sheets_tree.selection()
+            if not selection:
+                messagebox.showinfo("Otomatik Tespit", "Önce soldan bir görsel seçiniz.")
+                return
+            iid = selection[0]
+            rel = self._index_to_path.get(iid)
+            if not rel:
+                messagebox.showwarning("Uyarı", "Görsel yolu alınamadı.")
+                return
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+            abs_path = os.path.join(project_root, rel)
+            if not os.path.isfile(abs_path):
+                messagebox.showwarning("Uyarı", "Dosya bulunamadı.")
+                return
+            from tkinter.simpledialog import askstring
+            base = askstring("Kök Ad", "İsim kökü (örn. buton):", initialvalue="buton", parent=self.frame)
+            if not base:
+                return
+            count_str = askstring("Buton Sayısı", "Tahmini buton sayısı (opsiyonel):", initialvalue="", parent=self.frame)
+            try:
+                n_hint = int(count_str) if count_str else None
+            except Exception:
+                n_hint = None
+
+            # Görseli aç ve RGBA'ya çevir
+            img = Image.open(abs_path).convert("RGBA")
+            iw, ih = img.size
+
+            # Projeksiyon tabanlı ham tespit (satır/sütun bantları)
+            raw_props = self._detect_by_projections(img)
+            # İsteğe bağlı: kullanıcı bir sayı girdiyse ilk n adet ile sınırla
+            if n_hint is not None and n_hint > 0:
+                raw_props = raw_props[:n_hint]
+
+            if not raw_props:
+                messagebox.showinfo("Otomatik Tespit", "Uygun bölge bulunamadı.")
+                return
+
+            # Tam ekran overlay aç ve ilk ham önerileri çiz
+            try:
+                self._open_detection_overlay(abs_path, iw, ih)
+                self._render_detection_overlay(raw_props, iw, ih)
+            except Exception:
+                pass
+
+            # Rehberli tespit: kullanıcı referansı ile hizalama
+            ref_box: Optional[dict] = None  # {'x','y','width','height'}
+            saved = 0
+            for rp in raw_props:
+                # Referans uygula: varsa aynı yükseklik ve y, yatayda merkezle
+                guided = dict(rp)
+                if ref_box and ref_box.get("width", 0) > 0 and ref_box.get("height", 0) > 0:
+                    # Yükseklik referanstan alınır; Y, bandın ortasına referans yüksekliği merkezlenerek oturtulur
+                    guided_h = int(ref_box["height"])  # type: ignore[index]
+                    row_y1 = int(rp.get('row_y1', 0)); row_y2 = int(rp.get('row_y2', ih))
+                    band_cy = (row_y1 + row_y2) // 2
+                    guided_y = int(band_cy - guided_h // 2)
+                    # X merkezini ham bbox merkezinden al; yoksa sütun merkezini kullan
+                    col_x1 = int(rp.get('col_x1', rp.get('seg_x1', 0)))
+                    col_x2 = int(rp.get('col_x2', rp.get('seg_x2', iw)))
+                    if rp.get("width", 0) > 0:
+                        cx = rp["x"] + rp["width"] // 2
+                    else:
+                        cx = (col_x1 + col_x2) // 2
+                    guided_w = int(ref_box["width"])   # type: ignore[index]
+                    guided_x = int(cx - guided_w // 2)
+                    guided = {
+                        "x": guided_x,
+                        "y": guided_y,
+                        "width": guided_w,
+                        "height": guided_h,
+                        "index": rp["index"],
+                    }
+                    # Kolon bandına yatay kısıtlama (taşmayı ve üstüste binmeyi önle)
+                    cx1 = int(rp.get('col_x1', guided['x']))
+                    cx2 = int(rp.get('col_x2', guided['x'] + guided['width']))
+                    if cx2 > cx1:
+                        if guided['x'] < cx1:
+                            guided['x'] = cx1
+                        if guided['x'] + guided['width'] > cx2:
+                            guided['width'] = max(1, cx2 - guided['x'])
+                # Sınırları kısıtla
+                guided = self._clamp_bbox(guided, iw, ih)
+
+                action, edited = self._review_region_dialog(abs_path, guided)
+                if action == "accept":
+                    final_box = guided
+                    name = f"{base}_{guided['index']}"
+                    try:
+                        self.sprite_service.upsert_sprite_region(rel, name, final_box)
+                        saved += 1
+                    except Exception as e:
+                        messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
+                    # Referansı güncelle
+                    ref_box = final_box
+                    # Overlay'i güncelle: mevcut referansa göre tüm kutuları yeniden çiz
+                    try:
+                        all_guided = [self._clamp_bbox(self._apply_ref_on_raw(r, ref_box, iw, ih), iw, ih) for r in raw_props]
+                        self._render_detection_overlay(all_guided, iw, ih)
+                    except Exception:
+                        pass
+                elif action == "edit" and edited:
+                    name = f"{base}_{guided['index']}"
+                    try:
+                        self.sprite_service.upsert_sprite_region(rel, name, edited)
+                        saved += 1
+                    except Exception as e:
+                        messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
+                    # Referansı güncelle (kullanıcının düzenlediği kutu en iyi referanstır)
+                    ref_box = edited
+                    try:
+                        all_guided = [self._clamp_bbox(self._apply_ref_on_raw(r, ref_box, iw, ih), iw, ih) for r in raw_props]
+                        self._render_detection_overlay(all_guided, iw, ih)
+                    except Exception:
+                        pass
+                # skip -> hiçbir şey yapma
+
+            if saved > 0:
+                self._refresh_regions_list()
+                messagebox.showinfo("Otomatik Tespit", f"{saved} sprite kaydedildi.")
+            # Overlay'i kapat
+            try:
+                self._close_detection_overlay()
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                messagebox.showerror("Hata", f"Otomatik tespit başarısız: {e}")
+            except Exception:
+                pass
+
+    def _apply_ref_on_raw(self, rp: dict, ref_box: Optional[dict], iw: int, ih: int) -> dict:
+        """Ham kutuya referans hizalamayı uygular; referans yoksa hamı döndürür.
+
+        Y, ilgili satır bandının ortasına referans yüksekliği merkezlenerek yerleştirilir; X, ham bbox/kolon merkezinden alınır.
+        """
+        guided = dict(rp)
+        if ref_box and ref_box.get("width", 0) > 0 and ref_box.get("height", 0) > 0:
+            guided_h = int(ref_box["height"])  # type: ignore[index]
+            row_y1 = int(rp.get('row_y1', 0)); row_y2 = int(rp.get('row_y2', ih))
+            band_cy = (row_y1 + row_y2) // 2
+            guided_y = int(band_cy - guided_h // 2)
+            col_x1 = int(rp.get('col_x1', rp.get('seg_x1', 0)))
+            col_x2 = int(rp.get('col_x2', rp.get('seg_x2', iw)))
+            if rp.get("width", 0) > 0:
+                cx = rp["x"] + rp["width"] // 2
+            else:
+                cx = (col_x1 + col_x2) // 2
+            guided_w = int(ref_box["width"])   # type: ignore[index]
+            guided_x = int(cx - guided_w // 2)
+            guided = {
+                "x": guided_x,
+                "y": guided_y,
+                "width": guided_w,
+                "height": guided_h,
+                "index": rp.get("index"),
+            }
+            # Kolon bandına yatay kısıtlama
+            cx1 = int(rp.get('col_x1', guided['x']))
+            cx2 = int(rp.get('col_x2', guided['x'] + guided['width']))
+            if cx2 > cx1:
+                if guided['x'] < cx1:
+                    guided['x'] = cx1
+                if guided['x'] + guided['width'] > cx2:
+                    guided['width'] = max(1, cx2 - guided['x'])
+        return guided
+
+    def _detect_by_projections(self, img: Image.Image) -> List[dict]:
+        """Alfa projeksiyonları ile satır ve sütun bantlarını bularak ham kutular döndürür.
+
+        Dönüş: [{'x','y','width','height','index','row_y1','row_y2','col_x1','col_x2'}]
+        Sıralama: üstten alta, soldan sağa.
+        """
+        iw, ih = img.size
+        alpha = img.split()[3] if img.mode == 'RGBA' else img.convert('L')
+        px = alpha.load()
+        # 1) Yatay bantlar (satırlar)
+        bands: List[tuple[int,int]] = []
+        in_band = False; band_start = 0
+        for y in range(ih):
+            row_has = False
+            for x in range(iw):
+                if px[x, y] > 0:
+                    row_has = True; break
+            if row_has and not in_band:
+                in_band = True; band_start = y
+            elif not row_has and in_band:
+                if y - band_start >= 8:  # min yükseklik filtresi
+                    bands.append((band_start, y))
+                in_band = False
+        if in_band:
+            if ih - band_start >= 8:
+                bands.append((band_start, ih))
+
+        props: List[dict] = []
+        # 2) Her bant içinde dikey kolon kümeleri
+        for (y1, y2) in bands:
+            # Dikey projeksiyon
+            col_on = [False]*iw
+            for x in range(iw):
+                any_on = False
+                for y in range(y1, y2):
+                    if px[x, y] > 0:
+                        any_on = True; break
+                col_on[x] = any_on
+            # x aralıklarını çıkar (dar boşlukları birleştir)
+            gap_max = max(12, iw // 50)  # görsele göre ~%2 veya en az 12px
+            in_col = False; cx1 = 0; gap_run = 0
+            cols: List[tuple[int,int]] = []
+            for x in range(iw):
+                if col_on[x]:
+                    if not in_col:
+                        in_col = True; cx1 = x; gap_run = 0
+                    else:
+                        gap_run = 0  # içerideyken boşluk sıfırlanır
+                else:
+                    if in_col:
+                        gap_run += 1
+                        # İçerideyken küçük boşluklar devam ederse sütunu sürdür
+                        if gap_run > gap_max:
+                            # sütunu kapat
+                            end_x = x - gap_run + 1
+                            if end_x - cx1 >= 8:  # min genişlik filtresi
+                                cols.append((cx1, end_x))
+                            in_col = False; gap_run = 0
+            # Satır sonu için kapanmamış sütun
+            if in_col:
+                end_x = iw
+                if end_x - cx1 >= 8:
+                    cols.append((cx1, end_x))
+
+            # 3) Her sütun aralığında kesin bbox hesapla
+            for (x1, x2) in cols:
+                # Sınırlı bölgede bbox hesaplamak için küçük bir tarama
+                minx, miny, maxx, maxy = x2, y2, x1, y1
+                any_pix = False
+                for yy in range(y1, y2):
+                    for xx in range(x1, x2):
+                        if px[xx, yy] > 0:
+                            any_pix = True
+                            if xx < minx: minx = xx
+                            if yy < miny: miny = yy
+                            if xx > maxx: maxx = xx
+                            if yy > maxy: maxy = yy
+                if not any_pix:
+                    continue
+                w = max(1, maxx - minx + 1); h = max(1, maxy - miny + 1)
+                props.append({
+                    'x': int(minx), 'y': int(miny), 'width': int(w), 'height': int(h),
+                    'row_y1': int(y1), 'row_y2': int(y2), 'col_x1': int(x1), 'col_x2': int(x2),
+                })
+
+        # 4) Sırala ve index ver
+        props.sort(key=lambda b: (b['y'], b['x']))
+        for i, b in enumerate(props, start=1):
+            b['index'] = i
+        return props
+
+    def _open_detection_overlay(self, abs_image_path: str, iw: int, ih: int) -> None:
+        """Tam ekran bir overlay penceresi açar ve sprite sheet'i çizer."""
+        win = tk.Toplevel(self.frame)
+        try:
+            win.attributes('-fullscreen', True)
+        except Exception:
+            # Fallback: maksimize
+            try:
+                win.state('zoomed')
+            except Exception:
+                pass
+        win.title("Tespit Önizleme")
+        win.transient(self.frame)
+
+        # ESC ile kapat
+        win.bind('<Escape>', lambda e: self._close_detection_overlay())
+
+        # Ekran boyutu ve ölçek
+        sw = win.winfo_screenwidth(); sh = win.winfo_screenheight()
+        scale = min(sw / max(1, iw), sh / max(1, ih))
+        cw = int(iw * scale); ch = int(ih * scale)
+
+        canvas = tk.Canvas(win, width=cw, height=ch, background='black', highlightthickness=0)
+        canvas.pack(fill='both', expand=True)
+
+        # Görseli ölçekle ve çiz
+        pil = Image.open(abs_image_path).convert('RGBA')
+        pil_rz = pil.resize((cw, ch), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(pil_rz)
+        canvas.create_image(0, 0, anchor='nw', image=photo)
+
+        # Referansları sakla
+        self._det_overlay = {
+            'win': win,
+            'canvas': canvas,
+            'scale': scale,
+            'photo': photo,
+        }
+
+    def _render_detection_overlay(self, boxes: List[dict], iw: int, ih: int) -> None:
+        """Overlay'de kutuları kesik çizgi ve numara ile çizer."""
+        ov = getattr(self, '_det_overlay', None)
+        if not ov:
+            return
+        canvas = ov['canvas']; scale = ov['scale']
+        # Önce önceki overlay çizimlerini temizle (arka plan resmini korumak için tümünü silip resmi tekrar çizmek yerine kutuları tag ile yönet)
+        try:
+            canvas.delete('ov')
+        except Exception:
+            pass
+        for b in boxes:
+            try:
+                x = int(b.get('x', 0)); y = int(b.get('y', 0))
+                w = int(b.get('width', 0)); h = int(b.get('height', 0))
+                idx = int(b.get('index', 0))
+                sx = int(x * scale); sy = int(y * scale)
+                ex = int((x + w) * scale); ey = int((y + h) * scale)
+                canvas.create_rectangle(sx, sy, ex, ey, outline='#FF5252', width=2, dash=(6, 4), tags=('ov',))
+                canvas.create_text(sx + 4, sy + 4, text=str(idx), anchor='nw', fill='#FFF176', font=('TkDefaultFont', 14, 'bold'), tags=('ov',))
+            except Exception:
+                continue
+
+    def _close_detection_overlay(self) -> None:
+        ov = getattr(self, '_det_overlay', None)
+        if ov and ov.get('win'):
+            try:
+                ov['win'].destroy()
+            except Exception:
+                pass
+        self._det_overlay = None
+
+    def _clamp_bbox(self, box: dict, iw: int, ih: int) -> dict:
+        """Bbox'ı görüntü boyutlarına kısıtlar ve negatifleri düzeltir.
+
+        Args:
+            box: {'x','y','width','height', 'index'?}
+            iw: image width
+            ih: image height
+        Returns:
+            Yeni kısıtlanmış sözlük.
+        """
+        try:
+            x = int(box.get('x', 0)); y = int(box.get('y', 0))
+            w = int(max(1, box.get('width', 1))); h = int(max(1, box.get('height', 1)))
+            if x < 0:
+                w += x; x = 0
+            if y < 0:
+                h += y; y = 0
+            if x + w > iw:
+                w = max(1, iw - x)
+            if y + h > ih:
+                h = max(1, ih - y)
+            out = {"x": x, "y": y, "width": w, "height": h}
+            if 'index' in box:
+                out['index'] = box['index']
+            return out
+        except Exception:
+            return box
+
+    def _review_region_dialog(self, abs_image_path: str, region: dict) -> tuple[str, Optional[dict]]:
+        """Önerilen bir bölge için küçük inceleme penceresi açar.
+
+        Parametreler:
+        - abs_image_path: İncelenecek görselin mutlak yolu.
+        - region: {'x','y','width','height'} anahtarlarını içeren sözlük.
+
+        Dönüş:
+        - ("accept"|"edit"|"skip", edited_region or None)
+        """
+        # Küçük önizleme üret
+        try:
+            pil = Image.open(abs_image_path)
+            x = int(region.get('x', 0)); y = int(region.get('y', 0))
+            w = int(region.get('width', 0)); h = int(region.get('height', 0))
+            crop = pil.crop((x, y, x + w, y + h)) if (w > 0 and h > 0) else pil
+        except Exception:
+            crop = None
+
+        dlg = tk.Toplevel(self.frame)
+        dlg.title("Öneri İncele")
+        dlg.transient(self.frame)
+        dlg.grab_set()
+
+        wrap = ttk.Frame(dlg, padding=8)
+        wrap.pack(fill="both", expand=True)
+
+        if crop is not None:
+            # küçük önizleme 220x160
+            tw, th = 220, 160
+            try:
+                scale = min(tw / max(1, crop.width), th / max(1, crop.height))
+                rz = (max(1, int(crop.width * scale)), max(1, int(crop.height * scale)))
+                prev = crop.resize(rz, Image.LANCZOS)
+                photo = ImageTk.PhotoImage(prev)
+                lbl = ttk.Label(wrap, image=photo)
+                lbl.image = photo  # referans
+                lbl.pack()
+            except Exception:
+                ttk.Label(wrap, text="Önizleme yüklenemedi").pack()
+        else:
+            ttk.Label(wrap, text="Önizleme yok").pack()
+
+        btns = ttk.Frame(wrap)
+        btns.pack(fill="x", pady=(6,0))
+
+        result = {"action": "skip", "edited": None}
+
+        def do_accept():
+            result["action"] = "accept"
+            dlg.destroy()
+
+        def do_edit():
+            # Tam görselde Cropper aç
+            cropper = Cropper(self.frame, abs_image_path)
+            r = cropper.show()
+            if r:
+                result["action"] = "edit"
+                result["edited"] = {k: int(v) for k, v in r.items()}
+            dlg.destroy()
+
+        def do_skip():
+            result["action"] = "skip"
+            dlg.destroy()
+
+        ttk.Button(btns, text="Kabul", command=do_accept).pack(side=tk.RIGHT)
+        ttk.Button(btns, text="Editle", command=do_edit).pack(side=tk.RIGHT, padx=6)
+        ttk.Button(btns, text="Atla", command=do_skip).pack(side=tk.RIGHT)
+
+        dlg.wait_window()
+        return result["action"], result["edited"]
+
     
     def _refresh_definitions(self):
         return
@@ -324,14 +768,12 @@ class SpritesTab:
 
     # -------- Assets scanning --------
     def _scan_assets_images(self) -> List[str]:
-        """Recursively scan assets/ and assets/games/<game_id>/ for image files, plus img/ fallback.
+        """Recursively scan only assets/images/sprites/ for image files.
 
         Returns relative paths from project root using forward slashes.
         """
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-        assets_root = os.path.join(project_root, "assets")
-        # per_game_root = os.path.join(assets_root, "games", str(game_id) if game_id else "")
-        img_fallback = os.path.join(project_root, "img")
+        sprites_root = os.path.join(project_root, "assets", "images", "sprites")
         img_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
 
         def walk_collect(base_dir: str) -> List[str]:
@@ -346,10 +788,7 @@ class SpritesTab:
                             items.append(rel)
             return items
 
-        images: List[str] = []
-        images.extend(walk_collect(assets_root))
-        # images.extend(walk_collect(per_game_root))
-        images.extend(walk_collect(img_fallback))
+        images: List[str] = walk_collect(sprites_root)
         # de-duplicate preserving order
         seen = set(); out = []
         for p in images:

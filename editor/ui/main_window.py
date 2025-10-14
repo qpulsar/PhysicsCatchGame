@@ -19,6 +19,7 @@ from .tabs.screens_tab import ScreensTab
 from .game_dialog import GameDialog
 from .screen_designer import ScreenDesignerWindow
 from .media_manager import MediaManagerWindow
+from .effects_manager import EffectsManagerWindow
 from .sprites_manager import SpritesManagerWindow
 
 
@@ -502,6 +503,7 @@ class MainWindow:
         navbar.pack(side=tk.TOP, fill=tk.X)
         # Place global managers on the navbar as buttons
         ttk.Button(navbar, text="Sprite'ları Düzenle", command=self._open_sprites_manager).pack(side=tk.LEFT, padx=(10, 4), pady=6)
+        ttk.Button(navbar, text="Effectleri Düzenle", command=self._open_effects_manager).pack(side=tk.LEFT, padx=4, pady=6)
         ttk.Button(navbar, text="Medya'yı Düzenle", command=self._open_media_manager).pack(side=tk.LEFT, padx=4, pady=6)
         ttk.Button(navbar, text="Oyun Oyna", command=self._play_selected_game).pack(side=tk.RIGHT, padx=10, pady=6)
 
@@ -548,6 +550,16 @@ class MainWindow:
             SpritesManagerWindow(self.root, self.sprite_service, self.expression_service, self.level_service, self.game_service)
         except Exception as e:
             messagebox.showerror("Sprite", f"Pencere açılamadı: {e}")
+
+    def _open_effects_manager(self) -> None:
+        """Open the standalone Effects Manager window (global pool).
+
+        Note: Saving to DB is pending schema approval; the window allows selection and preview.
+        """
+        try:
+            EffectsManagerWindow(self.root)
+        except Exception as e:
+            messagebox.showerror("Effect", f"Pencere açılamadı: {e}")
 
     def _play_selected_game(self) -> None:
         """Seçili oyunu pygame penceresinde başlatır.

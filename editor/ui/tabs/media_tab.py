@@ -51,12 +51,15 @@ class MediaTab:
         # Proje köküne göre assets kökünü belirle (çalışma dizininden bağımsız)
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
         self.assets_root = os.path.join(project_root, "assets")
-        self.dir_images = os.path.join(self.assets_root, "images")
-        self.dir_audio = os.path.join(self.assets_root, "audio")
-        self.dir_midi = os.path.join(self.assets_root, "midi")
-        os.makedirs(self.dir_images, exist_ok=True)
-        os.makedirs(self.dir_audio, exist_ok=True)
-        os.makedirs(self.dir_midi, exist_ok=True)
+        # Klasörler: background, sprite, audio (music), sfx
+        self.dir_backgrounds = os.path.join(self.assets_root, "images", "backgrounds")
+        self.dir_sprites = os.path.join(self.assets_root, "images", "sprites")
+        self.dir_audio_music = os.path.join(self.assets_root, "audio", "music")
+        self.dir_audio_sfx = os.path.join(self.assets_root, "audio", "sfx")
+        os.makedirs(self.dir_backgrounds, exist_ok=True)
+        os.makedirs(self.dir_sprites, exist_ok=True)
+        os.makedirs(self.dir_audio_music, exist_ok=True)
+        os.makedirs(self.dir_audio_sfx, exist_ok=True)
 
         self.metadata_path = os.path.join(self.assets_root, "metadata.json")
         self.metadata: Dict[str, Dict[str, str]] = self._load_metadata()
@@ -106,9 +109,9 @@ class MediaTab:
         left.columnconfigure(0, weight=1)
 
         ttk.Label(left, text="Tür").grid(row=0, column=0, sticky="w")
-        self.type_var = tk.StringVar(value="images")
+        self.type_var = tk.StringVar(value="background")
         type_combo = ttk.Combobox(left, textvariable=self.type_var, state="readonly",
-                                  values=["images", "audio", "midi"])
+                                  values=["background", "audio", "sfx", "sprite"])
         type_combo.grid(row=0, column=1, sticky="ew", padx=4)
         type_combo.bind("<<ComboboxSelected>>", lambda e: self._reload_list())
 
@@ -224,13 +227,22 @@ class MediaTab:
             os.makedirs(base_dir, exist_ok=True)
 
     def _current_dir(self) -> str:
-        """Return the directory for the current selected type."""
+        """Return the directory for the current selected type.
+
+        background -> assets/images/backgrounds
+        sprite     -> assets/images/sprites
+        audio      -> assets/audio/music
+        sfx        -> assets/audio/sfx
+        """
         t = self.type_var.get()
-        if t == "images":
-            return self.dir_images
+        if t == "background":
+            return self.dir_backgrounds
+        if t == "sprite":
+            return self.dir_sprites
         if t == "audio":
-            return self.dir_audio
-        return self.dir_midi
+            return self.dir_audio_music
+        # default sfx
+        return self.dir_audio_sfx
 
     def _on_select(self) -> None:
         """Handle selection changes and update preview/details."""
@@ -327,12 +339,10 @@ class MediaTab:
     def _upload_media(self) -> None:
         """Open file dialog and copy selected file into assets with sanitized name."""
         t = self.type_var.get()
-        if t == "images":
+        if t in ("background", "sprite"):
             exts = [("Görseller", "*.png *.jpg *.jpeg *.bmp *.gif"), ("Tüm Dosyalar", "*.*")]
-        elif t == "audio":
-            exts = [("Ses", "*.wav *.ogg *.mp3"), ("Tüm Dosyalar", "*.*")]
         else:
-            exts = [("MIDI", "*.mid *.midi"), ("Tüm Dosyalar", "*.*")]
+            exts = [("Ses", "*.wav *.ogg *.mp3 *.midi *.mid"), ("Tüm Dosyalar", "*.*")]
         
         # Platform-agnostic dosya türleri
         exts = format_filetypes_for_dialog(exts)
@@ -594,7 +604,7 @@ class MediaTab:
             existing_keys = set(self.metadata.keys())
             current_files: List[str] = []
             # Yalnızca kendi yönettiğimiz alt klasörleri tara
-            for base in (self.dir_images, self.dir_audio, self.dir_midi):
+            for base in (self.dir_backgrounds, self.dir_sprites, self.dir_audio_music, self.dir_audio_sfx):
                 if not os.path.isdir(base):
                     continue
                 for root, _, fnames in os.walk(base):
