@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import json
+from collections import Counter
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser, simpledialog
 from typing import Dict, Any, Optional, List
@@ -85,6 +86,8 @@ class ScreenDesignerWindow(tk.Toplevel):
 
         self._bg_img_ref: Optional[ImageTk.PhotoImage] = None
         self._canvas_bg_path: Optional[str] = None
+        self._bg_display_to_path: Dict[str, str] = {}
+        self._bg_path_to_display: Dict[str, str] = {}
         # Zoom (rendering scale). Logical tasarım 800x600, çizim zoom ile ölçeklenir.
         self.zoom: float = 1.0
         self.zoom_var = tk.StringVar(value="100%")
@@ -212,7 +215,8 @@ class ScreenDesignerWindow(tk.Toplevel):
         assets_lf.pack(fill="x", pady=(0,8))
         ttk.Label(assets_lf, text="Arkaplan (assets)").pack(anchor="w")
         self.bg_path_var = tk.StringVar()
-        self.bg_combo = ttk.Combobox(assets_lf, textvariable=self.bg_path_var, state="readonly")
+        self.bg_display_var = tk.StringVar()
+        self.bg_combo = ttk.Combobox(assets_lf, textvariable=self.bg_display_var, state="readonly")
         self.bg_combo.pack(fill="x", pady=2)
         self.bg_combo.bind("<<ComboboxSelected>>", lambda e: self._on_bg_select())
         # Not: Müzik seçimi Sesler sekmesine taşındı
@@ -416,11 +420,54 @@ class ScreenDesignerWindow(tk.Toplevel):
     # Palette actions
     def _on_bg_select(self) -> None:
         """Arkaplan combobox'tan seçildiğinde önizleme uygular."""
-        rel = self.bg_path_var.get().strip()
+        display = self.bg_display_var.get().strip()
+        rel = self._bg_display_to_path.get(display, "").strip()
+        if not rel:
+            return
+        self.bg_path_var.set(rel)
         abs_path = self._abs_assets_path(rel)
         if abs_path:
             self._apply_canvas_bg(abs_path)
             self._set_dirty(True)
+
+    def _set_bg_selection(self, rel: str) -> None:
+        """Arka plan seçiminde içsel yolu saklayıp kullanıcıya görünen etiketi senkronize eder."""
+        rel = (rel or "").strip()
+        if not rel:
+            self.bg_path_var.set("")
+            self.bg_display_var.set("")
+            return
+        display = self._bg_path_to_display.get(rel)
+        if not display:
+            display = self._register_bg_option(rel)
+        self.bg_path_var.set(rel)
+        self.bg_display_var.set(display)
+
+    def _register_bg_option(self, rel: str) -> str:
+        """Combobox'ta olmayan bir arka plan yolunu kullanıcı dostu etiketiyle ekler."""
+        rel = (rel or "").strip()
+        if not rel:
+            return ""
+        base_label = os.path.basename(rel) or rel
+        parent = os.path.basename(os.path.dirname(rel)) or os.path.dirname(rel)
+        if parent:
+            base_label = f"{base_label} ({parent})"
+        label = self._make_unique_bg_label(base_label)
+        self._bg_display_to_path[label] = rel
+        self._bg_path_to_display[rel] = label
+        current_vals = list(self.bg_combo['values'] or ())
+        current_vals.append(label)
+        self.bg_combo['values'] = current_vals
+        return label
+
+    def _make_unique_bg_label(self, label: str) -> str:
+        """Arka plan etiketini combobox değerleri içinde benzersiz hale getirir."""
+        candidate = label or "Arka plan"
+        suffix = 2
+        while candidate in self._bg_display_to_path:
+            candidate = f"{label} [{suffix}]"
+            suffix += 1
+        return candidate
 
     def _parse_level_id(self) -> Optional[int]:
         """Level ekranları için screen_name'den level_id çıkarır.
@@ -899,9 +946,33 @@ class ScreenDesignerWindow(tk.Toplevel):
         images = dedup(images)
         audios = dedup(audios)
 
+        backgrounds_root = os.path.join(assets_root, "images", "backgrounds")
+        backgrounds_rel = os.path.relpath(backgrounds_root, project_root).replace('\\', '/')
+        if not backgrounds_rel.endswith('/'):
+            backgrounds_rel += '/'
+        background_images = [img for img in images if img.startswith(backgrounds_rel)]
+
         self._images = images
         self._audios = audios
-        self.bg_combo['values'] = images
+        self._background_images = background_images
+
+        self._bg_display_to_path.clear()
+        self._bg_path_to_display.clear()
+        display_values: List[str] = []
+        base_counts = Counter(os.path.basename(p) or p for p in background_images)
+        for rel in background_images:
+            base = os.path.basename(rel) or rel
+            label = base
+            if base_counts[base] > 1:
+                parent = os.path.basename(os.path.dirname(rel)) or os.path.dirname(rel)
+                if parent:
+                    label = f"{base} ({parent})"
+            unique_label = self._make_unique_bg_label(label)
+            self._bg_display_to_path[unique_label] = rel
+            self._bg_path_to_display[rel] = unique_label
+            display_values.append(unique_label)
+
+        self.bg_combo['values'] = display_values
         self.music_combo['values'] = audios
         # Level efekt ve sprite combobox'larını da doldur
         try:
@@ -921,9 +992,9 @@ class ScreenDesignerWindow(tk.Toplevel):
             pass
 
         # Varsayılan seçimleri doldur
-        if images and not self.bg_path_var.get():
-            self.bg_path_var.set(images[0])
-            abs_bg0 = self._abs_assets_path(images[0])
+        if background_images and not self.bg_path_var.get():
+            self._set_bg_selection(background_images[0])
+            abs_bg0 = self._abs_assets_path(background_images[0])
             if abs_bg0 and os.path.isfile(abs_bg0):
                 self._apply_canvas_bg(abs_bg0)
         if audios and not self.music_path_var.get():
@@ -1502,7 +1573,7 @@ class ScreenDesignerWindow(tk.Toplevel):
             # background
             bg = (data.get("background") or {}).get("image")
             if bg:
-                self.bg_path_var.set(bg)
+                self._set_bg_selection(bg)
                 abs_bg = self._abs_assets_path(bg)
                 if abs_bg and os.path.isfile(abs_bg):
                     self._apply_canvas_bg(abs_bg)
@@ -1510,8 +1581,6 @@ class ScreenDesignerWindow(tk.Toplevel):
             mus = data.get("music") or ""
             self.music_path_var.set(mus)
             # ensure combos show items if pre-saved values exist
-            if bg and bg not in (self.bg_combo['values'] or ()): 
-                self.bg_combo['values'] = list(self.bg_combo['values']) + [bg]
             if mus and mus not in (self.music_combo['values'] or ()): 
                 self.music_combo['values'] = list(self.music_combo['values']) + [mus]
             # Level ayarları

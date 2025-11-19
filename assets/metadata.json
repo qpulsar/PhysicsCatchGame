@@ -109,5 +109,7 @@
   "audio/sfx/transitions/sfx_movement_portal1.wav": {},
   "audio/sfx/transitions/sfx_movement_portal4.wav": {},
   "audio/sfx/transitions/sfx_movement_portal5.wav": {},
-  "audio/sfx/transitions/sfx_movement_portal6.wav": {}
+  "audio/sfx/transitions/sfx_movement_portal6.wav": {},
+  "images/backgrounds/level1.jpg": {},
+  "images/backgrounds/level2.jpg": {}
 }
