@@ -268,7 +268,10 @@ class Game:
                             self.carousel.selected_index = 0
                             self.carousel.target_x = SCREEN_WIDTH / 2
                     else: # level_up
-                        self.current_state = 'playing'
+                        # Yeni seviyeye geçerken önce bilgi ekranını kontrol et
+                        if not self._try_switch_to_level_info(self.selected_game_id, self.level_manager.level):
+                            # Bilgi ekranı yoksa, yeni seviyenin varlıklarını yükleyerek başlat
+                            self._start_playing(self.selected_game_id, self.level_manager.level)
                 elif self.current_state == 'game_info' and (event.key == pygame.K_RETURN or event.key == pygame.K_SPACE):
                     self.start_game(self.selected_game_id)
         return True
@@ -283,28 +286,8 @@ class Game:
                         # opening sonrasÄ± akÄ±ÅŸ: level info varsa gÃ¶sterilecek, yoksa oynanÄ±ÅŸ
                         # Screen Designer bazÄ± kurulumlarda seviye ekranlarÄ±nÄ± level_<DB id> adÄ±yla kaydediyor.
                         # Oyunda hem numaraya hem de DB id'ye gÃ¶re isimleri deneyelim.
-                        try:
-                            info = None
-                            lvl_num = 1
-                            lvl_id = self._resolve_level_id(self.selected_game_id, lvl_num)
-                            candidates = [
-                                f"level_{lvl_num}_info",
-                                f"level_{lvl_id}_info" if lvl_id else None,
-                            ]
-                            # debug log kaldÄ±rÄ±ldÄ±
-                            for name in filter(None, candidates):
-                                info = self.db.get_screen(self.selected_game_id, name)
-                                if info and isinstance(info, dict):
-                                    # debug log kaldÄ±rÄ±ldÄ±
-                                    break
-                        except Exception:
-                            info = None
-                        if info and isinstance(info, dict):
-                            self.level_info_data = info
-                            self._prepare_level_info_widgets()
-                            self.current_state = 'level_info'
-                        else:
-                            self._start_playing(self.selected_game_id)
+                        if not self._try_switch_to_level_info(self.selected_game_id, 1):
+                            self._start_playing(self.selected_game_id, 1)
                     elif act == 'back':
                         self.current_state = 'game_selection'
                     break
@@ -316,12 +299,10 @@ class Game:
             for b in self.level_info_buttons:
                 if b['rect'].collidepoint(pos):
                     act = b.get('action')
-                    if act == 'continue_level':
-                        self._start_playing(self.selected_game_id)
+                    if act in ('continue_level', 'continue', 'start_game', 'next_level'):
+                        self._start_playing(self.selected_game_id, self.level_manager.level)
                     elif act == 'back':
                         self.current_state = 'game_selection'
-                    elif act == 'start_game':
-                        self._start_playing(self.selected_game_id)
                     break
         elif self.current_state == 'playing':
             if self.game_state.help_button_rect.collidepoint(pos):
@@ -336,7 +317,7 @@ class Game:
                         elif act == 'back':
                             self.current_state = 'game_selection'
                         elif act == 'continue' or act == 'resume':
-                            # Åimdilik no-op; ileride pause desteÄŸi eklenebilir
+                            # Åžimdilik no-op; ileride pause desteÄŸi eklenebilir
                             pass
                         elif act == 'start_game':
                             # Zaten oyun iÃ§indeyiz; no-op
@@ -384,6 +365,33 @@ class Game:
             surface.blit(surf, (x, cy))
             cy += line_h
     
+    def _try_switch_to_level_info(self, game_id: int, level_num: int) -> bool:
+        """Belirtilen seviye iÃ§in bilgi ekranÄ± varsa yÃ¼kler ve 'level_info' durumuna geÃ§er.
+
+        Returns:
+            bool: Bilgi ekranÄ± bulundu ve geÃ§iÅŸ yapÄ±ldÄ±ysa True, aksi halde False.
+        """
+        try:
+            info = None
+            lvl_id = self._resolve_level_id(game_id, level_num)
+            candidates = [
+                f"level_{level_num}_info",
+                f"level_{lvl_id}_info" if lvl_id else None,
+            ]
+            for name in filter(None, candidates):
+                info = self.db.get_screen(game_id, name)
+                if info and isinstance(info, dict):
+                    break
+        except Exception:
+            info = None
+        
+        if info and isinstance(info, dict):
+            self.level_info_data = info
+            self._prepare_level_info_widgets()
+            self.current_state = 'level_info'
+            return True
+        return False
+
     def start_game(self, game_id):
         """Oyunu baÅŸlatÄ±r; sÄ±rayla aÃ§Ä±lÄ±ÅŸ ve seviye bilgi ekranlarÄ±nÄ± uygular.
 
@@ -405,42 +413,32 @@ class Game:
             self.current_state = 'opening'
             return
         # Bilgi ekranÄ±nÄ± kontrol et
-        try:
-            info = None
-            lvl_num = 1
-            lvl_id = self._resolve_level_id(game_id, lvl_num)
-            candidates = [
-                f"level_{lvl_num}_info",
-                f"level_{lvl_id}_info" if lvl_id else None,
-            ]
-            # debug log kaldÄ±rÄ±ldÄ±
-            for name in filter(None, candidates):
-                info = self.db.get_screen(game_id, name)
-                if info and isinstance(info, dict):
-                    # debug log kaldÄ±rÄ±ldÄ±
-                    break
-        except Exception:
-            info = None
-        if info and isinstance(info, dict):
-            self.level_info_data = info
-            self._prepare_level_info_widgets()
-            self.current_state = 'level_info'
+        if self._try_switch_to_level_info(game_id, 1):
             return
         # Aksi halde doÄŸrudan oynanÄ±ÅŸa geÃ§
-        self._start_playing(game_id)
+        self._start_playing(game_id, 1)
 
-    def _start_playing(self, game_id):
-        """EditÃ¶rdeki ayarlarÄ± uygulayarak oyunu ve Level 1'i baÅŸlatÄ±r."""
+    def _start_playing(self, game_id, level_num=1):
+        """Editördeki ayarları uygulayarak oyunu ve belirtilen seviyeyi başlatır."""
         try:
-            print(f"[SpriteDBG] _start_playing: game_id={game_id}")
+            print(f"[SpriteDBG] _start_playing: game_id={game_id} level={level_num}")
         except Exception:
             pass
-        self.level_manager.setup_level(1, game_id)
+        
+        # Temizlik: Önceki seviyeden kalan tüm sprite'ları temizle
+        if self.game_state.player:
+            self.game_state.player.kill()
+            self.game_state.player = None
+        self.game_state.all_sprites.empty()
+        self.game_state.items.empty()
+
+        self.level_manager.setup_level(level_num, game_id)
 
         # Load level-specific background if available
         self.level_bg_surface = None
         try:
             settings_map = self.db.get_game_settings(game_id)
+            lvl_key = f"level_{level_num}_background_path"
             lvl_key = f"level_{self.level_manager.level}_background_path"
             bg_path = settings_map.get(lvl_key)
             if bg_path and os.path.exists(bg_path):
@@ -896,10 +894,13 @@ class Game:
 
         # Apply settings from editor: max concurrent items, item speed
         try:
-            max_items_on_screen = int(settings_map.get('default_max_items', 5))
-            self.level_manager.max_items_on_screen = max_items_on_screen
-            item_speed = float(settings_map.get('default_item_speed', 3.0))
-            self.level_manager.item_speed = item_speed
+            if 'default_max_items' in settings_map:
+                max_items_on_screen = int(settings_map.get('default_max_items'))
+                self.level_manager.max_items_on_screen = max_items_on_screen
+            
+            if 'default_item_speed' in settings_map:
+                item_speed = float(settings_map.get('default_item_speed'))
+                self.level_manager.item_speed = item_speed
         except Exception:
             pass
 
@@ -1239,7 +1240,12 @@ class Game:
             return
             
         new_state = self.game_state.update(self.level_manager)
-        if new_state:
+        if new_state == 'level_up':
+            # Tebrikler ekranını atla, direkt sonraki seviye akışına gir
+            if not self._try_switch_to_level_info(self.selected_game_id, self.level_manager.level):
+                self._start_playing(self.selected_game_id, self.level_manager.level)
+            return
+        elif new_state:
             self.current_state = new_state
             return
 

@@ -176,6 +176,20 @@ class DatabaseManager:
             FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE,
             UNIQUE (game_id, name)
         )''')
+
+        # Create effects table to store reusable effect configurations
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS effects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            params_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE,
+            UNIQUE (game_id, name)
+        )''')
     
     def _initialize_default_data(self, cursor: sqlite3.Cursor) -> None:
         """Initialize default game and settings."""
@@ -465,5 +479,39 @@ class DatabaseManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM screens WHERE game_id = ? AND name = ?', (game_id, name))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # Effects operations
+    def add_effect(self, game_id: int, name: str, type_: str, params_json: str) -> int:
+        """Add a new effect configuration."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO effects (game_id, name, type, params_json)
+                VALUES (?, ?, ?, ?)
+            ''', (game_id, name, type_, params_json))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_effects(self, game_id: int) -> List[sqlite3.Row]:
+        """List all effects for a given game."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM effects WHERE game_id = ? ORDER BY name', (game_id,))
+            return cursor.fetchall()
+
+    def get_effect(self, game_id: int, name: str) -> Optional[sqlite3.Row]:
+        """Get an effect by name."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM effects WHERE game_id = ? AND name = ?', (game_id, name))
+            return cursor.fetchone()
+
+    def delete_effect(self, game_id: int, name: str) -> bool:
+        """Delete an effect by name."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM effects WHERE game_id = ? AND name = ?', (game_id, name))
             conn.commit()
             return cursor.rowcount > 0

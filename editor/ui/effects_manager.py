@@ -25,13 +25,17 @@ class EffectsManagerWindow(tk.Toplevel):
         frames: Seçilen karelerin listesi [{'x','y','w','h'}].
     """
 
-    def __init__(self, parent: tk.Tk):
+    def __init__(self, parent: tk.Tk, effect_service=None, game_id: int = None):
         """Pencereyi oluşturur ve UI bileşenlerini yerleştirir.
 
         Args:
             parent: Üst Tk penceresi
+            effect_service: Efekt servis örneği
+            game_id: Aktif oyun ID'si
         """
         super().__init__(parent)
+        self.effect_service = effect_service
+        self.game_id = game_id
         self.title("Effect Yöneticisi")
         self.geometry("1100x760")
         self.transient(parent)
@@ -61,7 +65,7 @@ class EffectsManagerWindow(tk.Toplevel):
         # Üst araç çubuğu
         bar = ttk.Frame(root)
         bar.grid(row=0, column=0, columnspan=2, sticky="ew")
-        ttk.Button(bar, text="Görsel Aç...", command=self._open_image).pack(side=tk.LEFT, padx=4)
+        ttk.Button(bar, text="Medya'dan Görsel Seç...", command=self._select_media_image).pack(side=tk.LEFT, padx=4)
         ttk.Label(bar, text="Efekt Adı:").pack(side=tk.LEFT)
         self.effect_name_var = tk.StringVar(value="effect")
         ttk.Entry(bar, textvariable=self.effect_name_var, width=24).pack(side=tk.LEFT, padx=4)
@@ -110,21 +114,54 @@ class EffectsManagerWindow(tk.Toplevel):
         self.status_var = tk.StringVar(value="Hazır")
         ttk.Label(status, textvariable=self.status_var).pack(side=tk.LEFT, padx=6)
 
+    def _select_media_image(self) -> None:
+        """Mevcut proje medyaları arasından seçim yapar."""
+        # Medya seçim penceresi - Basit bir Toplevel liste
+        try:
+            top = tk.Toplevel(self)
+            top.title("Görsel Seç")
+            top.geometry("400x500")
+            top.transient(self)
+            
+            tree = ttk.Treeview(top, columns=("path",), show="headings")
+            tree.heading("path", text="Dosya Yolu")
+            tree.pack(fill=tk.BOTH, expand=True)
+            
+            # Assets klasörünü tara
+            base_dir = os.path.join(self._assets_root, "images")
+            if os.path.isdir(base_dir):
+                for root, dirs, files in os.walk(base_dir):
+                    for f in files:
+                        if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
+                            full_path = os.path.join(root, f)
+                            rel_path = os.path.relpath(full_path, self._project_root)
+                            tree.insert("", tk.END, values=(rel_path,))
+            
+            def _on_select(event):
+                sel = tree.selection()
+                if not sel: return
+                val = tree.item(sel[0], "values")[0]
+                abs_path = os.path.join(self._project_root, val)
+                self._load_image(abs_path)
+                top.destroy()
+                
+            tree.bind("<Double-1>", _on_select)
+            
+        except Exception as e:
+            messagebox.showerror("Hata", f"Medya listesi açılamadı: {e}")
+
     def _open_image(self) -> None:
-        """Bir sprite sheet seçer ve canvas'a yükler."""
-        init_dir = os.path.join(self._assets_root, "images", "sprites")
-        os.makedirs(init_dir, exist_ok=True)
-        path = filedialog.askopenfilename(
-            title="Sprite Sheet Seç",
-            initialdir=init_dir,
-            filetypes=[("Görseller", "*.png *.jpg *.jpeg *.bmp *.gif"), ("Tüm Dosyalar", "*.*")]
-        )
-        if not path:
+        # Legacy method, kept for reference or fallback
+        self._select_media_image()
+
+    def _load_image(self, path: str) -> None:
+        """Belirtilen yolu yükler."""
+        if not path or not os.path.exists(path):
             return
         try:
             img = Image.open(path).convert("RGBA")
             self._pil_image = img
-            self._current_image_path = os.path.relpath(path, self._project_root)
+            self._current_image_path = os.path.relpath(path, self._project_root).replace('\\', '/')
             self._fit_image_to_canvas()
             self.frames.clear()
             self._refresh_list()
@@ -284,44 +321,35 @@ class EffectsManagerWindow(tk.Toplevel):
         self._preview_refs = []
 
     def _save_effect(self) -> None:
-        """Kullanıcının kare sırası ile bir efekt tanımını diske/DBye kaydetmek için tetiklenir.
-
-        Not: Kullanıcı onayı alınmadan veritabanı değişikliği yapılmaz. Geçici olarak
-        JSON olarak `assets/effects/` altına yazma seçeneği sunulur.
-        """
+        """Kullanıcının kare sırası ile bir efekt tanımını diske/DBye kaydetmek için tetiklenir."""
         if not self._current_image_path:
             messagebox.showwarning("Effect", "Önce bir sprite sheet seçin.")
             return
         if not self.frames:
             messagebox.showwarning("Effect", "Önce en az bir kare seçin.")
             return
+        if not self.game_id or not self.effect_service:
+            messagebox.showerror("Hata", "Oyun veya servis bilgisi eksik.")
+            return
+            
         name = (self.effect_name_var.get() or "effect").strip()
         if not name:
             name = "effect"
-        # Kullanıcıya DB şeması onayı isteği
-        if not messagebox.askyesno(
-            "DB Kaydı Onayı",
-            "Efekt tanımını veritabanına kaydetmek için şema/tablolar eklenecek. Onaylıyor musunuz?\n\n"
-            "Onaylamazsanız JSON olarak assets/effects/ altına kaydedebilirim."
-        ):
-            # JSON'a yaz
-            try:
-                out_dir = os.path.join(self._assets_root, "effects")
-                os.makedirs(out_dir, exist_ok=True)
-                import json as _json
-                data = {
-                    "name": name,
-                    "image": self._current_image_path.replace('\\', '/'),
-                    "frame_ms": max(1, int(self.frame_ms_var.get() or 120)),
-                    "frames": self.frames,
-                }
-                dst = os.path.join(out_dir, f"{name}.json")
-                with open(dst, 'w', encoding='utf-8') as f:
-                    _json.dump(data, f, ensure_ascii=False, indent=2)
-                messagebox.showinfo("Effect", f"JSON kaydedildi: {os.path.relpath(dst, self._project_root)}")
-            except Exception as e:
-                messagebox.showerror("Effect", f"JSON kaydedilemedi: {e}")
-            return
-        # DB onaylanırsa burada uygun servise yazım yapılacak (servis eklenince bağlanacak)
-        messagebox.showinfo("Effect", "DB kaydı için şema/servis onayı sonrası entegrasyon yapılacak.")
-
+            
+        # JSON formatında parametreleri hazırla
+        import json
+        try:
+            params = {
+                "image_path": self._current_image_path,
+                "frame_ms": max(1, int(self.frame_ms_var.get() or 120)),
+                "frames": self.frames,
+                "type": "frame_sequence"
+            }
+            
+            # DB'ye kaydet
+            self.effect_service.add_effect(self.game_id, name, "frame_sequence", json.dumps(params))
+            messagebox.showinfo("Başarılı", f"Efekt kaydedildi: {name}")
+            self.destroy()
+            
+        except Exception as e:
+            messagebox.showerror("Hata", f"Efekt kaydedilemedi: {e}")

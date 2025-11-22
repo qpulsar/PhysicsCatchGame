@@ -5,7 +5,7 @@ import os
 import shutil
 import unicodedata
 
-from .models import Game, Level, Expression, GameSettings, Sprite, SpriteDefinition, Screen
+from .models import Game, Level, Expression, GameSettings, Sprite, SpriteDefinition, Screen, Effect
 from ..database.database import DatabaseManager
 
 
@@ -136,6 +136,33 @@ class ScreenService:
     def update_setting(self, game_id: int, key: str, value: str) -> None:
         """Update a game setting."""
         self.db.set_setting(game_id, key, value)
+
+
+class EffectService:
+    """Service for managing reusable visual effect configurations."""
+
+    def __init__(self, db_manager: DatabaseManager):
+        self.db = db_manager
+
+    def add_effect(self, game_id: int, name: str, type_: str, params_json: str) -> Effect:
+        """Create a new effect configuration."""
+        eid = self.db.add_effect(game_id, name, type_, params_json)
+        row = self.db.get_effect(game_id, name)
+        return Effect.from_dict(dict(row)) if row else Effect(id=eid, game_id=game_id, name=name, type=type_, params_json=params_json)
+
+    def get_effects(self, game_id: int) -> List[Effect]:
+        """List all effects for a game."""
+        rows = self.db.get_effects(game_id)
+        return [Effect.from_dict(dict(r)) for r in rows]
+
+    def get_effect(self, game_id: int, name: str) -> Optional[Effect]:
+        """Get a single effect by name."""
+        row = self.db.get_effect(game_id, name)
+        return Effect.from_dict(dict(row)) if row else None
+
+    def delete_effect(self, game_id: int, name: str) -> bool:
+        """Delete an effect configuration."""
+        return self.db.delete_effect(game_id, name)
 
 
 class LevelService:

@@ -219,3 +219,38 @@ class Screen:
             created_at=datetime.fromisoformat(data.get('created_at')) if data.get('created_at') else datetime.now(),
             updated_at=datetime.fromisoformat(data.get('updated_at')) if data.get('updated_at') else datetime.now()
         )
+
+
+@dataclass
+class Effect:
+    """Represents a visual effect configuration."""
+    id: int
+    game_id: int
+    name: str
+    type: str  # 'sheet', 'particle', 'shader'
+    params_json: str  # JSON encoded parameters (path, fps, scale, cols, rows)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'game_id': self.game_id,
+            'name': self.name,
+            'type': self.type,
+            'params_json': self.params_json,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat()
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Effect':
+        return cls(
+            id=data['id'],
+            game_id=data['game_id'],
+            name=data['name'],
+            type=data['type'],
+            params_json=data['params_json'],
+            created_at=datetime.fromisoformat(data['created_at']),
+            updated_at=datetime.fromisoformat(data['updated_at'])
+        )

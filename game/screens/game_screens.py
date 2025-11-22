@@ -295,9 +295,32 @@ class Carousel:
             cards.append(card_surface)
         return cards
 
+    def get_current_selected_rect(self) -> pygame.Rect:
+        """Calculates the rect of the selected card based on current_x without drawing."""
+        # Seçili kartın merkezi self.current_x'tir
+        center_x = self.current_x
+        
+        # Ölçek hesabı (draw metoduyla aynı mantık)
+        dist = abs(center_x - SCREEN_WIDTH / 2)
+        scale = max(0.5, 1.0 - (dist / (SCREEN_WIDTH * 0.75)) * 0.5)
+        
+        w = int(self.card_w * scale)
+        h = int(self.card_h * scale)
+        
+        # Kartın dikey konumu (daha aşağı alındı)
+        cy = int(SCREEN_HEIGHT * 0.6)
+        rect = pygame.Rect(0, 0, w, h)
+        rect.center = (center_x, cy)
+        return rect
+
     def update(self):
         """Update carousel animation."""
-        self.current_x += (self.target_x - self.current_x) * self.anim_speed
+        # Basit lerp yerine, hedefe çok yakınsa direkt eşitleme
+        diff = self.target_x - self.current_x
+        if abs(diff) < 1.0:
+            self.current_x = self.target_x
+        else:
+            self.current_x += diff * self.anim_speed
 
     def draw(self, surface: pygame.Surface):
         """Draw the carousel on the given surface."""
@@ -314,12 +337,15 @@ class Carousel:
             dist_from_center = abs(center_x - SCREEN_WIDTH / 2)
             scale = max(0.5, 1.0 - (dist_from_center / (SCREEN_WIDTH * 0.75)) * 0.5)
             
+            # Uzaktaki kartları çizme
             if scale < 0.51 and i != self.selected_index:
-                self.card_rects.append((pygame.Rect(0,0,0,0), i)) # Add placeholder for correct indexing
+                self.card_rects.append((pygame.Rect(0,0,0,0), i)) 
                 continue
 
             scaled_card = pygame.transform.smoothscale(card, (int(self.card_w * scale), int(self.card_h * scale)))
-            rect = scaled_card.get_rect(center=(center_x, int(SCREEN_HEIGHT * 0.42)))
+            # Kartın dikey konumu (daha aşağı alındı)
+            cy = int(SCREEN_HEIGHT * 0.6)
+            rect = scaled_card.get_rect(center=(center_x, cy))
             
             # Store rect with its index
             self.card_rects.append((rect, i))
@@ -388,8 +414,11 @@ class Carousel:
                 self.dragging = False
                 # Snap to the nearest card
                 offset = self.current_x - (SCREEN_WIDTH / 2)
-                self.selected_index = round(-offset / self.card_spacing)
-                self.selected_index = max(0, min(len(self.games) - 1, self.selected_index))
+                # Daha kararlı bir yuvarlama için
+                idx = round(-offset / self.card_spacing)
+                self.selected_index = max(0, min(len(self.games) - 1, int(idx)))
+                
+                # Hedef konumu kesin olarak ayarla
                 self.target_x = (SCREEN_WIDTH / 2) - (self.selected_index * self.card_spacing)
 
                 # Check for click on the selected card
@@ -401,39 +430,90 @@ class Carousel:
         if event.type == pygame.MOUSEMOTION and self.dragging:
             drag_delta = event.pos[0] - self.drag_start_x
             self.current_x = self.drag_start_offset + drag_delta
-            self.target_x = self.current_x # Follow the drag
+            # Sürüklerken hedef de güncellensin ama sınırları aşmasın diye basit kontrol eklenebilir
+            # Şimdilik serbest bırakıyoruz, bırakınca snap olacak.
+            self.target_x = self.current_x
 
         return None
 
-def _draw_quadratic_curve(surface: pygame.Surface, p0, p1, p2, color, width=2, steps=40):
-    """Approximate a quadratic Bezier with line segments and draw it.
+def _draw_level_tree(screen, center_rect: pygame.Rect, levels: list):
+    """Draws levels branching out vertically (up/down) from the center card."""
+    if not levels:
+        return
 
-    Uses aalines when available for smoothing; falls back to regular lines.
-    """
-    pts = []
-    for i in range(steps + 1):
-        t = i / steps
-        x = (1-t)*(1-t)*p0[0] + 2*(1-t)*t*p1[0] + t*t*p2[0]
-        y = (1-t)*(1-t)*p0[1] + 2*(1-t)*t*p1[1] + t*t*p2[1]
-        pts.append((int(x), int(y)))
-    try:
-        pygame.draw.aalines(surface, color, False, pts)
-    except Exception:
-        pass
-    # Draw a slightly thicker line to make it visible on any background
-    pygame.draw.lines(surface, color, False, pts, width)
+    center_x, center_y = center_rect.center
+    
+    # Dalların uzunluğu (kısaltıldı)
+    radius = 110
+    
+    # Font (küçültüldü)
+    font = pygame.font.Font(None, 22)
 
-def _curve_intersects_any(p0, p1, p2, rects: list[pygame.Rect], steps=24) -> bool:
-    """Roughly test if quadratic curve passes through any rect by sampling points."""
-    for i in range(steps + 1):
-        t = i / steps
-        x = (1-t)*(1-t)*p0[0] + 2*(1-t)*t*p1[0] + t*t*p2[0]
-        y = (1-t)*(1-t)*p0[1] + 2*(1-t)*t*p1[1] + t*t*p2[1]
-        pt = (int(x), int(y))
-        for r in rects:
-            if r.collidepoint(pt):
-                return True
-    return False
+    # Gruplama: Çiftler yukarı, Tekler aşağı
+    upper_levels = levels[0::2]
+    lower_levels = levels[1::2]
+    
+    def draw_branch(level, angle_deg):
+        # Açı: 0 sağ, -90 yukarı, 90 aşağı
+        rad = math.radians(angle_deg)
+        
+        # Merkezden başla
+        start_pos = (center_x, center_y)
+        
+        end_x = center_x + radius * math.cos(rad)
+        end_y = center_y + radius * math.sin(rad)
+        end_pos = (end_x, end_y)
+        
+        line_color = (200, 200, 255, 180)
+        pygame.draw.line(screen, line_color, start_pos, end_pos, 3)
+        
+        # Uç nokta
+        pygame.draw.circle(screen, CARD_SELECTED_COLOR, (int(end_x), int(end_y)), 6)
+        pygame.draw.circle(screen, WHITE, (int(end_x), int(end_y)), 3)
+        
+        # Metin
+        level_name = level.get('level_name', str(level.get('level_number')))
+        text_surf = font.render(level_name, True, TEXT_COLOR)
+        
+        # Metni dalın ucuna, biraz öteye koy
+        t_offset = 18
+        tx = end_x + t_offset * math.cos(rad)
+        ty = end_y + t_offset * math.sin(rad)
+        text_rect = text_surf.get_rect(center=(tx, ty))
+        
+        # Arkaplan kutusu (yarı saydam)
+        bg_rect = text_rect.inflate(8, 4)
+        s = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+        s.fill((20, 20, 40, 200)) # Koyu yarı saydam
+        screen.blit(s, bg_rect.topleft)
+        screen.blit(text_surf, text_rect)
+
+    # Yukarıdakileri dağıt (-130 ile -50 arası)
+    if upper_levels:
+        count = len(upper_levels)
+        if count == 1:
+            angles = [-90]
+        else:
+            min_a, max_a = -130, -50
+            step = (max_a - min_a) / (count - 1)
+            angles = [min_a + i * step for i in range(count)]
+            
+        for i, lvl in enumerate(upper_levels):
+            draw_branch(lvl, angles[i])
+
+    # Aşağıdakileri dağıt (50 ile 130 arası)
+    if lower_levels:
+        count = len(lower_levels)
+        if count == 1:
+            angles = [90]
+        else:
+            min_a, max_a = 50, 130
+            step = (max_a - min_a) / (count - 1)
+            angles = [min_a + i * step for i in range(count)]
+            
+        for i, lvl in enumerate(lower_levels):
+            draw_branch(lvl, angles[i])
+
 
 def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
     """Draws the game selection carousel and handles the 'no games' state."""
@@ -443,84 +523,23 @@ def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
     
     if carousel:
         draw_text(screen, "Bir Oyun Seç", 56, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.14, TEXT_COLOR)
+        
         carousel.update()
-        carousel.draw(screen)
-        # Seçili oyunun seviyelerini yatay mindmap gibi listele ve kart ile spline bağla
+
+        # Önce seçili kartın pozisyonunu tahmin et ve ağacı arkaya çiz
         try:
             selected_game = carousel.games[carousel.selected_index] if carousel.games else None
             if selected_game:
+                # Çizim yapmadan rect'i hesapla
+                sel_rect = carousel.get_current_selected_rect()
                 levels = Database().get_levels(getattr(selected_game, 'id', 0))
-                sel_rect = getattr(carousel, 'selected_rect', None)
-                # Anchor: kartın sağ-orta kenarı; yoksa ekran ortası
-                if sel_rect:
-                    anchor_x = sel_rect.right
-                    # Çoklu anchor: seçili kartın üst ve alt kenarlarına eşit aralıklı dağıt
-                    x_start = anchor_x + 36
-                else:
-                    anchor_x = SCREEN_WIDTH // 2
-                    anchor_y = int(SCREEN_HEIGHT * 0.46)
-                    x_start = anchor_x + 36
-                # Yatay dağılım: soldan sağa eşit aralıklı
-                L = min(12, len(levels))
-                if L > 0:
-                    available_w = max(200, SCREEN_WIDTH - x_start - 48)
-                    step_x = max(140, available_w // (L + 1))
-                    base_y = anchor_y if not sel_rect else (sel_rect.top + sel_rect.height // 2)  # simetri
-                    # Alternatif dikey offset dizisi: +/- artan genlik
-                    offsets = []
-                    amp_seq = [32, 56, 80, 104, 128, 152]
-                    i = 0
-                    while len(offsets) < L:
-                        amp = amp_seq[min(i//2, len(amp_seq)-1)]
-                        offsets.append((-amp) if i % 2 == 0 else (+amp))
-                        i += 1
-                    # Anchor noktaları: üst ve alt kenar boyunca eşit aralıklı X'ler
-                    if sel_rect:
-                        m = 12
-                        avail_w = max(20, sel_rect.width - 2*m)
-                        step_ax = avail_w / max(2, (L + 1))
-                        top_points = [(int(sel_rect.left + m + (k+1)*step_ax), sel_rect.top) for k in range(L)]
-                        bot_points = [(int(sel_rect.left + m + (k+1)*step_ax), sel_rect.bottom) for k in range(L)]
-                        # L eleman için sırayla üst-alt seç
-                        anchors = [top_points[i] if i % 2 == 0 else bot_points[i] for i in range(L)]
-                    else:
-                        anchors = [(anchor_x, base_y) for _ in range(L)]
-                    # Çarpışmadan kaçınmak için yan thumbnail dikdörtgenlerini topla
-                    avoid_rects: list[pygame.Rect] = []
-                    try:
-                        for r, idx in getattr(carousel, 'card_rects', []):
-                            if not isinstance(r, pygame.Rect):
-                                continue
-                            if sel_rect and r.colliderect(sel_rect):
-                                continue
-                            # Biraz şişir (tam temas olmasın)
-                            avoid_rects.append(r.inflate(8, 8))
-                    except Exception:
-                        avoid_rects = []
-                    # Düğümleri çiz
-                    for idx in range(L):
-                        lv = levels[idx]
-                        x = x_start + (idx + 1) * step_x
-                        y = base_y + offsets[idx]
-                        # Level numarasını gösterme; yalnızca isim
-                        label = f"{lv.get('level_name')}"
-                        # Bağlantı eğrisi: anchor -> kontrol -> (x-14,y)
-                        end_pt = (x - 18, y)
-                        a_x, a_y = anchors[idx]
-                        ctrl = [int((a_x + end_pt[0]) / 2), int((a_y + y) / 2) + (12 if offsets[idx] >= 0 else -12)]
-                        # Yan thumbnail'lere değmeyi önlemek için kontrol noktasını ayarla
-                        tries = 0
-                        while _curve_intersects_any((a_x, a_y), tuple(ctrl), end_pt, avoid_rects) and tries < 8:
-                            ctrl[1] += 32 if offsets[idx] >= 0 else -32
-                            tries += 1
-                        # Anchor noktasına küçük düğüm çiz
-                        pygame.draw.circle(screen, TEXT_COLOR, (a_x, a_y), 3)
-                        _draw_quadratic_curve(screen, (a_x, a_y), tuple(ctrl), end_pt, TEXT_COLOR, width=3, steps=40)
-                        pygame.draw.circle(screen, TEXT_COLOR, end_pt, 3)
-                        # Metni hafif sola hizalı çiz; daha geniş wrap
-                        draw_text(screen, label, 24, x + 6, y, TEXT_COLOR, wrap_width=220)
-        except Exception:
+                _draw_level_tree(screen, sel_rect, levels)
+        except Exception as e:
+            print(f"Tree draw error: {e}")
             pass
+        
+        # Şimdi kartları öne çiz
+        carousel.draw(screen)
     else:
         draw_text(screen, "Oyun Bulunamadı", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, TEXT_COLOR)
         draw_text(screen, "Lütfen editör programını kullanarak bir oyun oluşturun.", 28, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, TEXT_COLOR)

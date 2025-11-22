@@ -126,10 +126,20 @@ class ScreensTab:
         try:
             root = self.frame.winfo_toplevel()
             game_id: Optional[int] = getattr(root, "current_game_id", None)
+            effect_service = getattr(root, "effect_service", None)
             if not game_id:
                 messagebox.showwarning("Ekranlar", "Lütfen önce bir oyun seçin.")
                 return
-            ScreenDesignerWindow(root, game_id, self.screen_service, self.sprite_service, self.game_service, self.level_service,
-                                 screen_name=screen_name, screen_type=screen_type)
+            ScreenDesignerWindow(
+                root,
+                game_id,
+                self.screen_service,
+                self.sprite_service,
+                self.game_service,
+                self.level_service,
+                effect_service=effect_service,
+                screen_name=screen_name,
+                screen_type=screen_type,
+            )
         except Exception as e:
             messagebox.showerror("Ekranlar", f"Pencere açılamadı: {e}")

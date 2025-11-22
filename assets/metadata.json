@@ -111,5 +111,8 @@
   "audio/sfx/transitions/sfx_movement_portal5.wav": {},
   "audio/sfx/transitions/sfx_movement_portal6.wav": {},
   "images/backgrounds/level1.jpg": {},
-  "images/backgrounds/level2.jpg": {}
+  "images/backgrounds/level2.jpg": {},
+  "images/sprites/sepets.png": {},
+  "images/backgrounds/start.jpg": {},
+  "images/sprites/arkanoid.png": {}
 }

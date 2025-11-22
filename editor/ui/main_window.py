@@ -9,7 +9,7 @@ import subprocess
 from PIL import Image, ImageTk
 
 from ..core.models import Game
-from ..core.services import GameService, LevelService, ExpressionService, SpriteService, ScreenService
+from ..core.services import GameService, LevelService, ExpressionService, SpriteService, ScreenService, EffectService
 from ..database.database import DatabaseManager
 from .tabs.levels_tab import LevelsTab
 from .tabs.settings_tab import SettingsTab
@@ -185,20 +185,23 @@ class DashboardFrame(ttk.Frame):
         frame.columnconfigure(0, weight=1)
         
         ttk.Label(frame, text="Açıklama", style="Subheader.TLabel").grid(row=0, column=0, sticky="w")
-        self.desc_label = ttk.Label(frame, text="", wraplength=400, justify="left")
+        self.desc_label = ttk.Label(frame, text="", wraplength=800, justify="left")
         self.desc_label.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
         ttk.Label(frame, text="Varsayılan Ayarlar", style="Subheader.TLabel").grid(row=2, column=0, sticky="w")
-        self.settings_text = tk.Text(frame, height=5, width=40, wrap="word", state="disabled", relief="flat")
+        self.settings_text = tk.Text(frame, height=8, width=40, wrap="word", state="disabled", relief="flat",
+                                     background="#45494a", foreground="#a9b7c6", insertbackground="white",
+                                     highlightthickness=1, highlightbackground="#555555", highlightcolor="#555555")
         self.settings_text.grid(row=3, column=0, sticky="ew", pady=(0, 10))
         
         ttk.Label(frame, text="Medya Galerisi", style="Subheader.TLabel").grid(row=4, column=0, sticky="w")
         self.gallery_frame = ttk.Frame(frame)
         self.gallery_frame.grid(row=5, column=0, sticky="nsew")
         frame.rowconfigure(5, weight=1)
-        self.gallery_canvas = tk.Canvas(self.gallery_frame, height=260)
+        
+        self.gallery_canvas = tk.Canvas(self.gallery_frame, height=300, background="#2b2b2b", highlightthickness=0)
         self.gallery_scrollbar = ttk.Scrollbar(self.gallery_frame, orient="vertical", command=self.gallery_canvas.yview)
-        self.gallery_inner = ttk.Frame(self.gallery_canvas)
+        self.gallery_inner = ttk.Frame(self.gallery_canvas, style="TFrame")
         self.gallery_inner.bind(
             "<Configure>",
             lambda e: self.gallery_canvas.configure(scrollregion=self.gallery_canvas.bbox("all"))
@@ -401,12 +404,13 @@ class DashboardFrame(ttk.Frame):
         col = 0
         thumb_size = (160, 100)
         for it in items:
-            frame = ttk.Frame(self.gallery_inner, padding=6)
-            frame.grid(row=row, column=col, sticky="nw")
+            frame = ttk.LabelFrame(self.gallery_inner, padding=5, text="")
+            frame.grid(row=row, column=col, sticky="nw", padx=5, pady=5)
+            
             path = it.get('path')
             abs_path = self._abs_path(path) if path else None
             thumb_label = ttk.Label(frame)
-            thumb_label.pack()
+            thumb_label.pack(pady=(0, 2))
             img_ref = None
             if abs_path and os.path.isfile(abs_path) and self._is_image(abs_path):
                 try:
@@ -483,10 +487,8 @@ class MainWindow:
         self.root.title("FizikselB Oyun Editörü")
         self.root.geometry("1200x800")
         
-        # --- Styles ---
-        style = ttk.Style(self.root)
-        style.configure("Header.TLabel", font=('Segoe UI', 14, 'bold'))
-        style.configure("Subheader.TLabel", font=('Segoe UI', 10, 'bold'))
+        # --- Theme ---
+        self._apply_theme()
 
         # --- Services ---
         self.db_manager = db_manager or DatabaseManager()
@@ -495,21 +497,31 @@ class MainWindow:
         self.expression_service = ExpressionService(self.db_manager)
         self.sprite_service = SpriteService(self.db_manager)
         self.screen_service = ScreenService(self.db_manager)
+        self.effect_service = EffectService(self.db_manager)
+        # Effect servisinin root üzerinden de erişilebilir olmasını sağla (ScreensTab/ScreenDesigner için)
+        try:
+            setattr(self.root, "effect_service", self.effect_service)
+        except Exception:
+            pass
         
         self.current_game_id: Optional[int] = None
         
         # --- Top Navbar ---
-        navbar = ttk.Frame(root)
+        # Navbar için özel stil (Theme içinde tanımlandı: Navbar.TFrame)
+        navbar = ttk.Frame(root, style="Navbar.TFrame", padding=5)
         navbar.pack(side=tk.TOP, fill=tk.X)
+        
         # Place global managers on the navbar as buttons
-        ttk.Button(navbar, text="Sprite'ları Düzenle", command=self._open_sprites_manager).pack(side=tk.LEFT, padx=(10, 4), pady=6)
-        ttk.Button(navbar, text="Effectleri Düzenle", command=self._open_effects_manager).pack(side=tk.LEFT, padx=4, pady=6)
-        ttk.Button(navbar, text="Medya'yı Düzenle", command=self._open_media_manager).pack(side=tk.LEFT, padx=4, pady=6)
-        ttk.Button(navbar, text="Oyun Oyna", command=self._play_selected_game).pack(side=tk.RIGHT, padx=10, pady=6)
+        ttk.Button(navbar, text="Sprite'ları Düzenle", command=self._open_sprites_manager, style="Navbar.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(navbar, text="Effectleri Düzenle", command=self._open_effects_manager, style="Navbar.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(navbar, text="Medya'yı Düzenle", command=self._open_media_manager, style="Navbar.TButton").pack(side=tk.LEFT, padx=5)
+        
+        # Play button - Accent style
+        ttk.Button(navbar, text="Oyun Oyna ▶", command=self._play_selected_game, style="Accent.TButton").pack(side=tk.RIGHT, padx=10)
 
         # --- Layout ---
         paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        paned_window.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         # Left: Games List
         self.games_list_frame = GamesListFrame(
@@ -537,6 +549,141 @@ class MainWindow:
         self.games_list_frame.refresh_games()
         self.dashboard_frame.update_view()
 
+    def _apply_theme(self):
+        """Uygulama genelinde modern koyu tema uygular."""
+        style = ttk.Style(self.root)
+        
+        # Mevcut temayı 'clam' olarak ayarla (özelleştirme için en iyisi)
+        try:
+            style.theme_use('clam')
+        except tk.TclError:
+            pass
+            
+        # Renk Paleti (Dark Modern - IntelliJ / VSCode benzeri)
+        colors = {
+            "bg": "#2b2b2b",             # Ana arka plan
+            "fg": "#a9b7c6",             # Ana metin
+            "panel_bg": "#313335",       # Panel/Sidebar arka planı
+            "input_bg": "#45494a",       # Giriş kutuları
+            "border": "#555555",         # Kenarlıklar
+            "accent": "#365880",         # Vurgu (Buton vb.)
+            "accent_hover": "#4b6eaf",   # Vurgu hover
+            "select_bg": "#2f65ca",      # Seçim arka planı
+            "success": "#4CAF50",        # Başarı rengi
+            "warning": "#FFC107"         # Uyarı rengi
+        }
+
+        self.root.configure(background=colors["bg"])
+        
+        # --- Genel Widget Ayarları ---
+        style.configure(".", 
+                        background=colors["bg"], 
+                        foreground=colors["fg"], 
+                        borderwidth=0, 
+                        font=('Segoe UI', 9))
+                        
+        style.configure("TFrame", background=colors["bg"])
+        style.configure("TLabelframe", 
+                        background=colors["bg"], 
+                        foreground=colors["fg"], 
+                        bordercolor=colors["border"])
+                        
+        style.configure("TLabelframe.Label", 
+                        background=colors["bg"], 
+                        foreground="#cc7832", # Turuncu tonu
+                        font=('Segoe UI', 9, 'bold'))
+
+        style.configure("TLabel", background=colors["bg"], foreground=colors["fg"])
+        
+        # --- Headers ---
+        style.configure("Header.TLabel", font=('Segoe UI', 14, 'bold'), foreground="#cc7832")
+        style.configure("Subheader.TLabel", font=('Segoe UI', 10, 'bold'), foreground="#a9b7c6")
+
+        # --- Buttons ---
+        style.configure("TButton", 
+                        background=colors["panel_bg"], 
+                        foreground="white", 
+                        borderwidth=1, 
+                        bordercolor=colors["border"], 
+                        focuscolor=colors["border"],
+                        padding=(8, 4))
+                        
+        style.map("TButton",
+                  background=[("active", colors["border"]), ("pressed", colors["input_bg"])],
+                  foreground=[("active", "white")])
+
+        # Accent Button (Örn: Oyun Oyna, Kaydet)
+        style.configure("Accent.TButton", 
+                        background=colors["accent"], 
+                        foreground="white", 
+                        font=('Segoe UI', 9, 'bold'))
+        style.map("Accent.TButton", 
+                  background=[("active", colors["accent_hover"])])
+        
+        # Navbar Buttons
+        style.configure("Navbar.TButton", 
+                        background=colors["panel_bg"], 
+                        font=('Segoe UI', 9))
+
+        # --- Navbar Frame ---
+        style.configure("Navbar.TFrame", background=colors["panel_bg"])
+
+        # --- Treeview (Listeler) ---
+        style.configure("Treeview",
+                        background=colors["input_bg"],
+                        foreground="white",
+                        fieldbackground=colors["input_bg"],
+                        borderwidth=0,
+                        font=('Segoe UI', 9),
+                        rowheight=24)
+        
+        style.map("Treeview", background=[("selected", colors["select_bg"])])
+        
+        style.configure("Treeview.Heading",
+                        background=colors["panel_bg"],
+                        foreground="white",
+                        relief="flat",
+                        font=('Segoe UI', 9, 'bold'),
+                        padding=(5, 5))
+                        
+        # --- Notebook (Sekmeler) ---
+        style.configure("TNotebook", background=colors["bg"], borderwidth=0)
+        style.configure("TNotebook.Tab",
+                        background=colors["panel_bg"],
+                        foreground=colors["fg"],
+                        padding=(12, 6),
+                        borderwidth=0)
+                        
+        style.map("TNotebook.Tab",
+                  background=[("selected", colors["bg"]), ("active", colors["input_bg"])],
+                  foreground=[("selected", "white")],
+                  expand=[("selected", [1, 1, 1, 0])]) # Seçili sekme biraz büyüsün
+
+        # --- Entry & Combobox ---
+        style.configure("TEntry", 
+                        fieldbackground=colors["input_bg"], 
+                        foreground="white", 
+                        insertcolor="white", 
+                        bordercolor=colors["border"],
+                        padding=4)
+                        
+        style.configure("TCombobox", 
+                        fieldbackground=colors["input_bg"], 
+                        foreground="white", 
+                        arrowcolor="white", 
+                        bordercolor=colors["border"])
+        
+        style.map("TCombobox", 
+                  fieldbackground=[("readonly", colors["input_bg"])],
+                  selectbackground=[("readonly", colors["select_bg"])])
+
+        # --- Scrollbar ---
+        style.configure("Vertical.TScrollbar", 
+                        background=colors["panel_bg"], 
+                        troughcolor=colors["bg"], 
+                        bordercolor=colors["bg"], 
+                        arrowcolor="white")
+
     def _open_media_manager(self) -> None:
         """Open the standalone Media Manager window (global pool)."""
         try:
@@ -556,8 +703,11 @@ class MainWindow:
 
         Note: Saving to DB is pending schema approval; the window allows selection and preview.
         """
+        if not self.current_game_id:
+            messagebox.showwarning("Uyarı", "Efektleri düzenlemek için önce bir oyun seçmelisiniz.")
+            return
         try:
-            EffectsManagerWindow(self.root)
+            EffectsManagerWindow(self.root, self.effect_service, game_id=self.current_game_id)
         except Exception as e:
             messagebox.showerror("Effect", f"Pencere açılamadı: {e}")
 

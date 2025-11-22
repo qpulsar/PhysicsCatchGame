@@ -48,7 +48,7 @@ class ScreenDesignerWindow(tk.Toplevel):
     CANVAS_H = 768
 
     def __init__(self, parent: tk.Tk, game_id: int, screen_service, sprite_service, game_service, level_service=None,
-                 screen_name: str = "opening", screen_type: str = "menu"):
+                 effect_service=None, screen_name: str = "opening", screen_type: str = "menu"):
         """Designer'ı başlatır.
 
         Args:
@@ -81,6 +81,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.sprite_service = sprite_service
         self.game_service = game_service
         self.level_service = level_service
+        self.effect_service = effect_service
         self.screen_name = screen_name
         self.screen_type = screen_type
 
@@ -117,10 +118,51 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._effect_current_list: list[ImageTk.PhotoImage] = []
         self._effect_current_index: int = 0
         self._effect_cycle_kind: str = "ok"  # ok -> bad -> ok ...
+        # EffectService tabanlı efekt tanımları için haritalar
+        self._effect_name_to_params: Dict[str, Dict[str, Any]] = {}
+        self._effect_image_to_name: Dict[str, str] = {}
+
+        # UI Değişkenleri (Erken Tanım)
+        self.zoom_var = tk.StringVar(value="100%")
+        
+        # Konum
+        self.pos_x_var = tk.StringVar()
+        self.pos_y_var = tk.StringVar()
+        
+        # Label
+        self.label_color_var = tk.StringVar(value="#FFFFFF")
+        self.label_size_var = tk.StringVar(value="20")
+        
+        # Buton
+        self.button_text_var = tk.StringVar(value="Buton")
+        self.button_action_var = tk.StringVar(value="start_game")
+        self.button_color_var = tk.StringVar(value="#4CAF50")
+        self.button_sprite_var = tk.StringVar()
+        
+        # Sprite
+        self.image_sprite_var = tk.StringVar()
+        
+        # Level - Basket & Effect
+        self.level_basket_sprite_var = tk.StringVar()
+        self.level_basket_len_var = tk.StringVar(value="128")
+        self.level_effect_ok_var = tk.StringVar()
+        self.level_effect_bad_var = tk.StringVar()
+        self.level_effect_fps_var = tk.StringVar(value="30")
+        self.level_effect_scale_var = tk.StringVar(value="60")
+        
+        # Level - SFX & Music
+        self.level_sfx_ok_var = tk.StringVar()
+        self.level_sfx_bad_var = tk.StringVar()
+        self.music_path_var = tk.StringVar()
+        
+        # Level - HUD
+        self.level_hud_sprite_var = tk.StringVar()
+        self.level_help_area_var = tk.StringVar(value="none")
 
         # Level ekranı ise, level_id'yi UI kurulmadan ÖNCE çöz (UI bu alana bakıyor olabilir)
         self.level_id = self._parse_level_id() if (self.screen_type or "").lower() == "level" else None
 
+        self._apply_theme()
         self._build_ui()
         self._scan_assets()
         # Sprite/audio dropdown'larını ilk yüklemede de doldur
@@ -128,294 +170,456 @@ class ScreenDesignerWindow(tk.Toplevel):
             self._load_sprite_regions()
         except Exception:
             pass
+        # Oyun için tanımlanmış efekt kayıtlarını yükle
+        try:
+            self._load_effects_for_game()
+        except Exception:
+            pass
         self._load_existing()
+
+    def _apply_theme(self) -> None:
+        """Modern koyu tema ayarlarını ve stillerini yapılandırır."""
+        style = ttk.Style(self)
+        # 'clam' teması renk özelleştirmeleri için iyi bir temeldir
+        try:
+            style.theme_use('clam')
+        except tk.TclError:
+            pass
+
+        # Renk Paleti (Dark Modern)
+        bg_color = "#2b2b2b"       # Ana arka plan
+        panel_color = "#313335"    # Paneller
+        fg_color = "#a9b7c6"       # Genel yazı rengi
+        accent_color = "#4b6eaf"   # Vurgu (Seçim vb.)
+        entry_bg = "#45494a"       # Input alanları
+        border_color = "#555555"
+
+        self.configure(background=bg_color)
+
+        # Genel element yapılandırması
+        style.configure(".", background=bg_color, foreground=fg_color, borderwidth=0)
+        style.configure("TFrame", background=bg_color)
+        style.configure("TLabelframe", background=bg_color, foreground=fg_color, bordercolor=border_color)
+        style.configure("TLabelframe.Label", background=bg_color, foreground="#cc7832", font=("Segoe UI", 9, "bold"))
+        style.configure("TLabel", background=bg_color, foreground=fg_color)
+        
+        # Butonlar
+        style.configure("TButton", background=panel_color, foreground="white", borderwidth=1, bordercolor=border_color, padding=4)
+        style.map("TButton",
+                  background=[("active", accent_color), ("pressed", border_color)],
+                  foreground=[("active", "white")])
+
+        # Accent Button (Örn: Kaydet)
+        style.configure("Accent.TButton", background="#365880", foreground="white", font=("Segoe UI", 9, "bold"))
+        style.map("Accent.TButton", background=[("active", "#4b6eaf")])
+
+        # Treeview (Liste)
+        style.configure("Treeview", 
+                        background=entry_bg, 
+                        foreground="white", 
+                        fieldbackground=entry_bg, 
+                        borderwidth=0,
+                        font=("Segoe UI", 9))
+        style.map("Treeview", background=[("selected", accent_color)])
+        style.configure("Treeview.Heading", background=panel_color, foreground="white", relief="flat")
+        
+        # Giriş Elemanları
+        style.configure("TEntry", fieldbackground=entry_bg, foreground="white", insertcolor="white", bordercolor=border_color)
+        style.configure("TCombobox", fieldbackground=entry_bg, foreground="white", arrowcolor="white", bordercolor=border_color)
+        style.map("TCombobox", fieldbackground=[("readonly", entry_bg)], selectbackground=[("readonly", entry_bg)])
+
+        # Tablar (Notebook)
+        style.configure("TNotebook", background=bg_color, borderwidth=0)
+        style.configure("TNotebook.Tab", background=panel_color, foreground=fg_color, padding=(10, 4))
+        style.map("TNotebook.Tab", background=[("selected", entry_bg)], foreground=[("selected", "white")])
+
+        # Özel stiller
+        style.configure("Toolbar.TFrame", background=panel_color)
+        style.configure("Subheader.TLabel", font=("Segoe UI", 11, "bold"), foreground="#cc7832")
 
     # UI setup
     def _build_ui(self) -> None:
-        """Ana arayüzü oluşturur: sol palet, orta kanvas, sağ özellik paneli."""
-        self.columnconfigure(1, weight=1)
-        self.rowconfigure(0, weight=1)
+        """Ana arayüzü oluşturur: Üst bar, ve 3 panelli (Sol, Orta, Sağ) yapı."""
+        # Ana grid yapılandırması (tek hücre, tamamını kapla)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=0) # Toolbar
+        self.rowconfigure(1, weight=1) # Main content
 
-        # Center canvas (ilk önce oluştur ki komut tıklamaları sırasında hazır olsun)
-        center = ttk.Frame(self, padding=8)
-        center.grid(row=0, column=1, sticky="nsew")
-        center.rowconfigure(0, weight=1)
-        center.columnconfigure(0, weight=1)
-        self.canvas = tk.Canvas(center, width=self.CANVAS_W, height=self.CANVAS_H, background="#1e1e1e")
-        self.canvas.grid(row=0, column=0, sticky="nsew")
+        # --- 1. Üst Araç Çubuğu (Toolbar) ---
+        toolbar = ttk.Frame(self, style="Toolbar.TFrame", padding=5)
+        toolbar.grid(row=0, column=0, sticky="ew")
+        
+        ttk.Label(toolbar, text="Tasarımcı:", style="Subheader.TLabel", background="#313335").pack(side=tk.LEFT, padx=(5, 10))
+        
+        # Zoom kontrolleri
+        ttk.Label(toolbar, text="Zoom:", background="#313335").pack(side=tk.LEFT, padx=(10, 2))
+        zoom_box = ttk.Combobox(toolbar, textvariable=self.zoom_var, state="readonly", width=6,
+                                 values=["50%", "75%", "100%", "125%", "150%"])
+        zoom_box.pack(side=tk.LEFT)
+        zoom_box.bind("<<ComboboxSelected>>", lambda e: self._on_zoom_change())
+
+        # Sağ taraf toolbar butonları
+        ttk.Button(toolbar, text="Kapat", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+        self.save_btn = ttk.Button(toolbar, text="KAYDET", command=self._save, style="Accent.TButton")
+        self.save_btn.pack(side=tk.RIGHT, padx=5)
+
+        # --- 2. Ana İçerik (PanedWindow) ---
+        # Horizontal PanedWindow: Sol (Araçlar), Orta (Tuval), Sağ (Özellikler)
+        main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        main_pane.grid(row=1, column=0, sticky="nsew")
+
+        # -- SOL PANEL (Tools & Assets) --
+        left_panel = ttk.Frame(main_pane, padding=5)
+        main_pane.add(left_panel, weight=1)
+
+        # Sol panel içeriği: Notebook ile sekmeli yapı (Daha temiz görünüm için)
+        left_tabs = ttk.Notebook(left_panel)
+        left_tabs.pack(fill="both", expand=True)
+
+        # Sekme 1: Ekle & Düzenle
+        tab_tools = ttk.Frame(left_tabs, padding=5)
+        left_tabs.add(tab_tools, text="Araçlar")
+
+        # Widget Ekleme
+        grp_add = ttk.LabelFrame(tab_tools, text="Öğe Ekle")
+        grp_add.pack(fill="x", pady=(0, 10))
+        
+        btn_grid = ttk.Frame(grp_add)
+        btn_grid.pack(fill="x", pady=5)
+        ttk.Button(btn_grid, text="Etiket (Label)", command=self._add_label).grid(row=0, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(btn_grid, text="Buton", command=self._add_button).grid(row=0, column=1, sticky="ew", padx=2, pady=2)
+        ttk.Button(btn_grid, text="Devam Btn", command=self._add_continue_button).grid(row=1, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(btn_grid, text="Sprite", command=self._add_image_sprite).grid(row=1, column=1, sticky="ew", padx=2, pady=2)
+        btn_grid.columnconfigure(0, weight=1); btn_grid.columnconfigure(1, weight=1)
+
+        # Nesne Listesi (Treeview)
+        grp_items = ttk.LabelFrame(tab_tools, text="Katmanlar / Nesneler")
+        grp_items.pack(fill="both", expand=True, pady=(0, 10))
+        
+        tree_scroll = ttk.Scrollbar(grp_items)
+        tree_scroll.pack(side=tk.RIGHT, fill="y")
+        self.obj_tree = ttk.Treeview(grp_items, columns=("name",), show="headings", height=10, 
+                                     selectmode="browse", yscrollcommand=tree_scroll.set)
+        tree_scroll.config(command=self.obj_tree.yview)
+        self.obj_tree.heading("name", text="Öğe Adı", anchor="w")
+        self.obj_tree.column("name", stretch=True)
+        self.obj_tree.pack(fill="both", expand=True)
+        self.obj_tree.bind("<<TreeviewSelect>>", lambda e: self._on_tree_select())
+
+        # Katman butonları
+        zrow = ttk.Frame(grp_items)
+        zrow.pack(fill="x", pady=4)
+        ttk.Button(zrow, text="▲ Yukarı", command=self._bring_forward, width=8).pack(side=tk.LEFT, padx=2, expand=True, fill="x")
+        ttk.Button(zrow, text="▼ Aşağı", command=self._send_backward, width=8).pack(side=tk.LEFT, padx=2, expand=True, fill="x")
+        
+        # Yönetim butonları
+        act_row = ttk.Frame(grp_items)
+        act_row.pack(fill="x", pady=2)
+        ttk.Button(act_row, text="Ad Değiştir", command=self._rename_selected).pack(side=tk.LEFT, padx=2, expand=True, fill="x")
+        ttk.Button(act_row, text="Sil", command=self._delete_selected).pack(side=tk.LEFT, padx=2, expand=True, fill="x")
+
+        # Sekme 2: Varlıklar (Arkaplan, Müzik)
+        tab_assets = ttk.Frame(left_tabs, padding=5)
+        left_tabs.add(tab_assets, text="Arkaplan")
+        
+        grp_bg = ttk.LabelFrame(tab_assets, text="Genel Ayarlar")
+        grp_bg.pack(fill="x", pady=5)
+        
+        ttk.Label(grp_bg, text="Arkaplan Görseli:").pack(anchor="w", pady=(2, 0))
+        self.bg_path_var = tk.StringVar()
+        self.bg_display_var = tk.StringVar()
+        self.bg_combo = ttk.Combobox(grp_bg, textvariable=self.bg_display_var, state="readonly")
+        self.bg_combo.pack(fill="x", pady=(0, 5))
+        self.bg_combo.bind("<<ComboboxSelected>>", lambda e: self._on_bg_select())
+
+        # -- ORTA PANEL (Canvas) --
+        center_panel = ttk.Frame(main_pane, style="TFrame") # Koyu arkaplan
+        main_pane.add(center_panel, weight=4)
+        
+        # Canvas'ı ortalamak için container
+        center_panel.rowconfigure(0, weight=1)
+        center_panel.columnconfigure(0, weight=1)
+        
+        # Canvas etrafında scrollbar eklenebilir ama şimdilik fixed boyutlu canvas
+        self.canvas = tk.Canvas(center_panel, width=self.CANVAS_W, height=self.CANVAS_H, 
+                                background="#1e1e1e", highlightthickness=0)
+        self.canvas.grid(row=0, column=0) # Sticky yok, ortada dursun
+        
+        # Canvas eventleri
         self.canvas.bind("<Button-1>", self._on_canvas_click)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
 
-        # Sepet önizlemesi için canvas'ta bir yer tutucu oluştur
+        # Önizleme (Preview) Elemanları (Sepet, Efekt vb.)
+        self._create_canvas_previews()
+
+        # -- SAĞ PANEL (Properties) --
+        right_panel = ttk.Frame(main_pane, padding=5, width=300)
+        main_pane.add(right_panel, weight=1)
+        
+        ttk.Label(right_panel, text="Özellikler Paneli", style="Subheader.TLabel").pack(anchor="w", pady=(0, 10))
+
+        # Scroll edilebilir özellikler alanı (ekran küçükse taşmaması için)
+        prop_canvas = tk.Canvas(right_panel, background="#2b2b2b", highlightthickness=0)
+        prop_scrollbar = ttk.Scrollbar(right_panel, orient="vertical", command=prop_canvas.yview)
+        self.prop_inner = ttk.Frame(prop_canvas)
+        
+        self.prop_inner.bind(
+            "<Configure>",
+            lambda e: prop_canvas.configure(scrollregion=prop_canvas.bbox("all"))
+        )
+        prop_window = prop_canvas.create_window((0, 0), window=self.prop_inner, anchor="nw")
+        
+        # Canvas boyutuna uydur (Genişlik ve Yükseklik)
+        def _on_prop_resize(event):
+            canvas_width = event.width
+            canvas_height = event.height
+            # İçeriğin ihtiyaç duyduğu minimum yükseklik
+            req_height = self.prop_inner.winfo_reqheight()
+            # Canvas yüksekliği veya içerik yüksekliğinden büyük olanı al
+            new_height = max(canvas_height, req_height)
+            prop_canvas.itemconfig(prop_window, width=canvas_width, height=new_height)
+        
+        prop_canvas.bind("<Configure>", _on_prop_resize)
+        prop_canvas.configure(yscrollcommand=prop_scrollbar.set)
+        
+        prop_canvas.pack(side="left", fill="both", expand=True)
+        prop_scrollbar.pack(side="right", fill="y")
+
+        # İçerik oluşturucular (Sağ panele eklenenler self.prop_inner içine gidecek)
+        self._build_property_panels(self.prop_inner)
+
+    def _create_canvas_previews(self):
+        """Canvas üzerindeki özel önizleme öğelerini oluşturur."""
+        # Sepet
         self._basket_preview_id = self.canvas.create_image(
-            self.CANVAS_W / 2, self.CANVAS_H - 40,  # Alt-orta
-            anchor="s",
-            state="hidden",
-            tags=("__basket_preview__",)
+            self.CANVAS_W / 2, self.CANVAS_H - 40, anchor="s", state="hidden", tags=("__basket_preview__",)
         )
-
-        # Efekt önizleme yer tutucu (sepetin üzerinde çizilecek)
+        # Efekt
         self._effect_preview_id = self.canvas.create_image(
-            self.CANVAS_W / 2, self.CANVAS_H - 90,
-            anchor="s",
-            state="hidden",
-            tags=("__effect_preview__",)
+            self.CANVAS_W / 2, self.CANVAS_H - 90, anchor="s", state="hidden", tags=("__effect_preview__",)
         )
-
-        # Düşen item arkaplanı için bir önizleme yer tutucu (üst-orta)
+        # Düşen item
         self._item_preview_id = self.canvas.create_image(
-            self.CANVAS_W / 2, 90,
-            anchor="n",
-            state="hidden",
-            tags=("__item_bg_preview__",)
+            self.CANVAS_W / 2, 90, anchor="n", state="hidden", tags=("__item_bg_preview__",)
         )
-        # Üzerine metin yer tutucu
+        # Düşen item text
         self._item_preview_text_id = self.canvas.create_text(
-            self.CANVAS_W / 2, 90,
-            text="",
-            fill="#FFFFFF",
-            font=("Segoe UI", 24),
-            anchor="n",
-            state="hidden",
-            tags=("__item_bg_preview_text__",)
+            self.CANVAS_W / 2, 90, text="", fill="#FFFFFF", font=("Segoe UI", 24), anchor="n",
+            state="hidden", tags=("__item_bg_preview_text__",)
         )
 
-        # Left sidebar grouped by tasks
-        left = ttk.Frame(self, padding=8)
-        left.grid(row=0, column=0, sticky="ns")
+    def _build_property_panels(self, parent):
+        """Sağ paneldeki özellik gruplarını oluşturur."""
+        
+        # 1. Konum
+        pos_frame = ttk.LabelFrame(parent, text="Konum & Boyut")
+        pos_frame.pack(fill="x", pady=5)
+        
+        p_grid = ttk.Frame(pos_frame)
+        p_grid.pack(fill="x", pady=5)
+        ttk.Label(p_grid, text="X:").grid(row=0, column=0, padx=5)
+        ttk.Entry(p_grid, textvariable=self.pos_x_var, width=6).grid(row=0, column=1)
+        ttk.Label(p_grid, text="Y:").grid(row=0, column=2, padx=5)
+        ttk.Entry(p_grid, textvariable=self.pos_y_var, width=6).grid(row=0, column=3)
+        
+        ttk.Button(pos_frame, text="Konumu Uygula", command=self._apply_position).pack(fill="x", pady=(5,0))
 
-        # Araçlar
-        tools_lf = ttk.LabelFrame(left, text="Araçlar")
-        tools_lf.pack(fill="x", pady=(0,8))
-        ttk.Button(tools_lf, text="Label Ekle", command=self._add_label).pack(fill="x", pady=3)
-        ttk.Button(tools_lf, text="Buton Ekle", command=self._add_button).pack(fill="x", pady=3)
-        ttk.Button(tools_lf, text="Devam Butonu Ekle", command=self._add_continue_button).pack(fill="x", pady=3)
-        ttk.Button(tools_lf, text="Sprite Ekle", command=self._add_image_sprite).pack(fill="x", pady=3)
-
-        # Nesneler
-        items_lf = ttk.LabelFrame(left, text="Nesneler")
-        items_lf.pack(fill="both", expand=True, pady=(0,8))
-        tree_frame = ttk.Frame(items_lf)
-        tree_frame.pack(fill="both", expand=True)
-        self.obj_tree = ttk.Treeview(tree_frame, columns=("name",), show="headings", height=8, selectmode="browse")
-        self.obj_tree.heading("name", text="Ad")
-        self.obj_tree.column("name", stretch=True)
-        self.obj_tree.pack(fill="both", expand=True)
-        self.obj_tree.bind("<<TreeviewSelect>>", lambda e: self._on_tree_select())
-        zrow = ttk.Frame(items_lf); zrow.pack(fill="x", pady=4)
-        ttk.Button(zrow, text="Öne Getir", command=self._bring_forward).pack(side=tk.LEFT, expand=True, fill="x", padx=(0,2))
-        ttk.Button(zrow, text="Arkaya Gönder", command=self._send_backward).pack(side=tk.LEFT, expand=True, fill="x", padx=(2,0))
-        row_actions = ttk.Frame(items_lf); row_actions.pack(fill="x", pady=(2,0))
-        ttk.Button(row_actions, text="Yeniden Adlandır", command=self._rename_selected).pack(side=tk.LEFT, expand=True, fill="x", padx=(0,2))
-        ttk.Button(row_actions, text="Sil", command=self._delete_selected).pack(side=tk.LEFT, expand=True, fill="x", padx=(2,0))
-
-        # Arkaplan
-        assets_lf = ttk.LabelFrame(left, text="Arkaplan & Müzik")
-        assets_lf.pack(fill="x", pady=(0,8))
-        ttk.Label(assets_lf, text="Arkaplan (assets)").pack(anchor="w")
-        self.bg_path_var = tk.StringVar()
-        self.bg_display_var = tk.StringVar()
-        self.bg_combo = ttk.Combobox(assets_lf, textvariable=self.bg_display_var, state="readonly")
-        self.bg_combo.pack(fill="x", pady=2)
-        self.bg_combo.bind("<<ComboboxSelected>>", lambda e: self._on_bg_select())
-        # Not: Müzik seçimi Sesler sekmesine taşındı
-
-        # Görünüm & Kayıt
-        view_lf = ttk.LabelFrame(left, text="Görünüm & Kayıt")
-        view_lf.pack(fill="x")
-        ttk.Label(view_lf, text="Yakınlaştırma").pack(anchor="w", pady=(2,0))
-        zoom_box = ttk.Combobox(view_lf, textvariable=self.zoom_var, state="readonly",
-                                 values=["50%", "75%", "100%", "125%", "150%"])
-        zoom_box.pack(fill="x")
-        zoom_box.bind("<<ComboboxSelected>>", lambda e: self._on_zoom_change())
-        # Save/Close
-        self.save_btn = ttk.Button(view_lf, text="Kaydet", command=self._save, style="TButton")
-        self.save_btn.pack(fill="x", pady=(8,2))
-        ttk.Button(view_lf, text="Kapat", command=self.destroy).pack(fill="x")
-
-        # Right property panel
-        right = ttk.Frame(self, padding=8)
-        right.grid(row=0, column=2, sticky="ns")
-        ttk.Label(right, text="Özellikler", style="Subheader.TLabel").pack(anchor="w")
-
-        # Common position
-        pos_frame = ttk.LabelFrame(right, text="Konum")
-        pos_frame.pack(fill="x", pady=6)
-        self.pos_x_var = tk.StringVar()
-        self.pos_y_var = tk.StringVar()
-        row1 = ttk.Frame(pos_frame); row1.pack(fill="x", pady=2)
-        ttk.Label(row1, text="X:").pack(side=tk.LEFT); ttk.Entry(row1, textvariable=self.pos_x_var, width=6).pack(side=tk.LEFT)
-        ttk.Label(row1, text="Y:").pack(side=tk.LEFT, padx=(8,0)); ttk.Entry(row1, textvariable=self.pos_y_var, width=6).pack(side=tk.LEFT)
-        ttk.Button(pos_frame, text="Uygula", command=self._apply_position).pack(anchor="e", pady=(4,0))
-
-        # Label props
-        self.label_frame = ttk.LabelFrame(right, text="Label")
-        self.label_text = tk.Text(self.label_frame, height=3, width=28, wrap="word")
-        self.label_color_var = tk.StringVar(value="#FFFFFF")
-        self.label_size_var = tk.StringVar(value="20")
+        # 2. Label Props
+        self.label_frame = ttk.LabelFrame(parent, text="Etiket Ayarları")
+        self.label_text = tk.Text(self.label_frame, height=3, width=20, wrap="word", 
+                                  background="#45494a", foreground="white", insertbackground="white", borderwidth=0)
+        
         ttk.Label(self.label_frame, text="Metin:").pack(anchor="w")
-        self.label_text.pack(fill="x")
-        row = ttk.Frame(self.label_frame); row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Renk:").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.label_color_var, width=10).pack(side=tk.LEFT)
-        ttk.Button(row, text="Seç", command=self._pick_label_color).pack(side=tk.LEFT, padx=4)
-        row2 = ttk.Frame(self.label_frame); row2.pack(fill="x", pady=2)
-        ttk.Label(row2, text="Punto:").pack(side=tk.LEFT)
-        ttk.Entry(row2, textvariable=self.label_size_var, width=6).pack(side=tk.LEFT)
-        # Apply instantly: bind changes
+        self.label_text.pack(fill="x", pady=(0, 5))
+        
+        l_row = ttk.Frame(self.label_frame)
+        l_row.pack(fill="x")
+        ttk.Label(l_row, text="Renk:").pack(side=tk.LEFT)
+        ttk.Entry(l_row, textvariable=self.label_color_var, width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Button(l_row, text="Seç", command=self._pick_label_color, width=4).pack(side=tk.LEFT)
+        
+        l_row2 = ttk.Frame(self.label_frame)
+        l_row2.pack(fill="x", pady=5)
+        ttk.Label(l_row2, text="Boyut:").pack(side=tk.LEFT)
+        ttk.Entry(l_row2, textvariable=self.label_size_var, width=5).pack(side=tk.LEFT, padx=5)
+
+        # Bindings
         self.label_text.bind("<KeyRelease>", lambda e: (self._apply_label_props(), self._set_dirty(True)))
         self.label_color_var.trace_add('write', lambda *args: (self._apply_label_props(), self._set_dirty(True)))
         self.label_size_var.trace_add('write', lambda *args: (self._apply_label_props(), self._set_dirty(True)))
 
-        # Button props
-        self.button_frame = ttk.LabelFrame(right, text="Buton")
-        self.button_text_var = tk.StringVar(value="Buton")
-        self.button_action_var = tk.StringVar(value="start_game")
+        # 3. Button Props
+        self.button_frame = ttk.LabelFrame(parent, text="Buton Ayarları")
+        
         ttk.Label(self.button_frame, text="Yazı:").pack(anchor="w")
-        ttk.Entry(self.button_frame, textvariable=self.button_text_var).pack(fill="x")
-        ttk.Label(self.button_frame, text="Aksiyon:").pack(anchor="w", pady=(6,0))
-        # 'continue_level' bilgi ekranlarından seviyeye geçiş için eklenmiştir
-        ttk.Combobox(
-            self.button_frame,
-            textvariable=self.button_action_var,
-            state="readonly",
-            values=["start_game", "continue_level", "back"]
-        ).pack(fill="x")
-        # Button bg color (used if no sprite image selected)
-        self.button_color_var = tk.StringVar(value="#4CAF50")
-        color_row = ttk.Frame(self.button_frame); color_row.pack(fill="x", pady=(6,0))
-        ttk.Label(color_row, text="Arka plan rengi:").pack(side=tk.LEFT)
-        ttk.Entry(color_row, textvariable=self.button_color_var, width=10).pack(side=tk.LEFT)
-        ttk.Button(color_row, text="Seç", command=self._pick_button_color).pack(side=tk.LEFT, padx=4)
-        # Sprite region selection (from assets/metadata.json)
-        sprite_row = ttk.Frame(self.button_frame); sprite_row.pack(fill="x", pady=(6,0))
-        ttk.Label(sprite_row, text="Sprite Bölgesi:").pack(side=tk.LEFT)
-        self.button_sprite_var = tk.StringVar()
-        self.button_sprite_combo = ttk.Combobox(sprite_row, textvariable=self.button_sprite_var, state="readonly")
-        self.button_sprite_combo.pack(side=tk.LEFT, expand=True, fill="x", padx=(4,0))
-        # Apply sprite immediately on selection
+        ttk.Entry(self.button_frame, textvariable=self.button_text_var).pack(fill="x", pady=(0,5))
+        
+        ttk.Label(self.button_frame, text="Aksiyon:").pack(anchor="w")
+        ttk.Combobox(self.button_frame, textvariable=self.button_action_var, state="readonly",
+                     values=["start_game", "continue_level", "next_level", "back"]).pack(fill="x", pady=(0,5))
+        
+        b_row = ttk.Frame(self.button_frame)
+        b_row.pack(fill="x")
+        ttk.Label(b_row, text="Renk:").pack(side=tk.LEFT)
+        ttk.Entry(b_row, textvariable=self.button_color_var, width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Button(b_row, text="Seç", command=self._pick_button_color, width=4).pack(side=tk.LEFT)
+
+        ttk.Label(self.button_frame, text="Sprite Bölgesi:").pack(anchor="w", pady=(5,0))
+        self.button_sprite_combo = ttk.Combobox(self.button_frame, textvariable=self.button_sprite_var, state="readonly")
+        self.button_sprite_combo.pack(fill="x")
         self.button_sprite_combo.bind('<<ComboboxSelected>>', lambda e: (self._apply_button_sprite(), self._set_dirty(True)))
-        # Apply instantly: bind changes
-        # text
+        
+        # Bindings
         self.button_text_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
-        # action
         self.button_action_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
-        # color entry
         self.button_color_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
 
-        # Image sprite props (image-only)
-        self.sprite_frame = ttk.LabelFrame(right, text="Sprite (Görsel)")
-        spr_row = ttk.Frame(self.sprite_frame); spr_row.pack(fill="x", pady=(2,0))
-        ttk.Label(spr_row, text="Sprite Bölgesi:").pack(side=tk.LEFT)
-        self.image_sprite_var = tk.StringVar()
-        self.image_sprite_combo = ttk.Combobox(spr_row, textvariable=self.image_sprite_var, state="readonly")
-        self.image_sprite_combo.pack(side=tk.LEFT, expand=True, fill="x", padx=(4,0))
+        # 4. Sprite Props
+        self.sprite_frame = ttk.LabelFrame(parent, text="Görsel (Sprite) Ayarları")
+        ttk.Label(self.sprite_frame, text="Görsel Seçimi:").pack(anchor="w")
+        self.image_sprite_combo = ttk.Combobox(self.sprite_frame, textvariable=self.image_sprite_var, state="readonly")
+        self.image_sprite_combo.pack(fill="x")
         self.image_sprite_combo.bind('<<ComboboxSelected>>', lambda e: (self._apply_image_sprite(), self._set_dirty(True)))
 
-        # Level ekranına özel ayarlar
-        self.level_frame = ttk.LabelFrame(right, text="Seviye Ayarları")
-        # Sekmeli düzen (UX): Sepet & Efektler, Sesler, HUD & Yardım, Arka Plan
-        nb = ttk.Notebook(self.level_frame)
-        nb.pack(fill="both", expand=True, pady=(2,0))
-        tab_basket_fx = ttk.Frame(nb, padding=8)
-        tab_sfx = ttk.Frame(nb, padding=8)
-        tab_hud = ttk.Frame(nb, padding=8)
-        tab_bg = ttk.Frame(nb, padding=8)
-        nb.add(tab_basket_fx, text="Sepet & Efektler")
-        nb.add(tab_sfx, text="Sesler")
-        nb.add(tab_hud, text="HUD & Yardım")
-        nb.add(tab_bg, text="Arka Plan")
+        # 5. Level Settings
+        self.level_frame = ttk.LabelFrame(parent, text="Seviye (Level) Ayarları")
+        
+        # Level ayarları için Notebook (Küçük alanda sekmeler daha iyi)
+        lnb = ttk.Notebook(self.level_frame)
+        lnb.pack(fill="both", expand=True, pady=5)
+        
+        lt_basket = ttk.Frame(lnb, padding=5); lnb.add(lt_basket, text="Oyun")
+        lt_sfx = ttk.Frame(lnb, padding=5); lnb.add(lt_sfx, text="Ses")
+        lt_hud = ttk.Frame(lnb, padding=5); lnb.add(lt_hud, text="HUD")
+        lt_bg = ttk.Frame(lnb, padding=5); lnb.add(lt_bg, text="Nesne")
 
-        # Form satırı yardımcıları
-        def _form_row_container(parent: ttk.Frame, label_text: str) -> ttk.Frame:
-            """Sağa hizalı etiket (sabit genişlik) ve genişleyen input alanı için konteyner döndürür."""
-            row = ttk.Frame(parent)
-            row.pack(fill="x", pady=4)
-            ttk.Label(row, text=label_text, width=18, anchor="e").pack(side=tk.LEFT, padx=(0,6))
-            inner = ttk.Frame(row)
-            inner.pack(side=tk.LEFT, fill="x", expand=True)
-            return inner
+        # -- Helper --
+        def _frm(p, txt):
+            f = ttk.Frame(p); f.pack(fill="x", pady=2)
+            ttk.Label(f, text=txt, anchor="w").pack(fill="x")
+            return f
+        
+        # Display vars for simplified view
+        self.level_basket_display_var = tk.StringVar()
+        self.level_hud_display_var = tk.StringVar()
+        self.level_effect_ok_display_var = tk.StringVar()
+        self.level_effect_bad_display_var = tk.StringVar()
+        self.level_sfx_ok_display_var = tk.StringVar()
+        self.level_sfx_bad_display_var = tk.StringVar()
+        self.music_display_var = tk.StringVar()
 
-        # Sepet (basket)
-        lf_row1 = _form_row_container(tab_basket_fx, "Sepet Sprite:")
-        self.level_basket_sprite_var = tk.StringVar()
-        self.level_basket_sprite_combo = ttk.Combobox(lf_row1, textvariable=self.level_basket_sprite_var, state="readonly")
+        # Mapping helper
+        def _on_img_select(disp_var, path_var, cb=None):
+            disp = disp_var.get()
+            path = self._img_display_map.get(disp, "")
+            path_var.set(path)
+            if cb: cb()
+
+        def _on_effect_select(disp_var, path_var, cb=None):
+            """Effect combobox seçiminde, mümkünse DB kayıtlı efekt parametrelerini kullan.
+
+            - Kullanıcıya isim gösterilir (Effect.name).
+            - İçeride ilgili efektin image_path değeri level_effect_*_var içinde saklanır.
+            - Eğer isim bir efekt kaydıyla eşleşmezse, eski dosya bazlı davranışa geri döner.
+            """
+            name = (disp_var.get() or "").strip()
+            params_map = getattr(self, "_effect_name_to_params", {}) or {}
+            params = params_map.get(name)
+            if not params:
+                # Geriye dönük uyumluluk: doğrudan görsel listesinden seçilmiş olabilir
+                _on_img_select(disp_var, path_var, cb)
+                return
+            path = (params.get("image_path") or "").strip()
+            path_var.set(path)
+            if cb:
+                cb()
+
+        def _on_sprite_region_select(disp_var, path_var, cb=None):
+            """Sprite bölgesi seçimlerinde (Name — Path) değeri olduğu gibi sakla."""
+            val = disp_var.get()
+            path_var.set(val)
+            if cb: cb()
+
+        def _on_aud_select(disp_var, path_var):
+            disp = disp_var.get()
+            path = self._audio_display_map.get(disp, "")
+            path_var.set(path)
+
+        # Basket
+        self.level_basket_sprite_combo = ttk.Combobox(_frm(lt_basket, "Sepet Sprite:"), 
+                                                      textvariable=self.level_basket_display_var, state="readonly")
         self.level_basket_sprite_combo.pack(fill="x")
-        self.level_basket_sprite_combo.bind("<<ComboboxSelected>>", lambda e: self._update_basket_preview())
-        lf_row1b = _form_row_container(tab_basket_fx, "Sepet Uzunluğu:")
-        self.level_basket_len_var = tk.StringVar(value="128")
+        self.level_basket_sprite_combo.bind("<<ComboboxSelected>>", 
+            lambda e: _on_sprite_region_select(self.level_basket_display_var, self.level_basket_sprite_var, self._update_basket_preview))
+        
         self.level_basket_len_var.trace_add('write', lambda *args: self._update_basket_preview())
-        ttk.Entry(lf_row1b, textvariable=self.level_basket_len_var, width=10).pack(fill="x")
+        ttk.Entry(_frm(lt_basket, "Sepet Genişlik:"), textvariable=self.level_basket_len_var).pack(fill="x")
 
-        # Sesler
-        lf_row2 = _form_row_container(tab_sfx, "Doğru SFX:")
-        self.level_sfx_ok_var = tk.StringVar()
-        self.level_sfx_ok_combo = ttk.Combobox(lf_row2, textvariable=self.level_sfx_ok_var, state="readonly")
+        # Efektler
+        self.level_effect_ok_combo = ttk.Combobox(_frm(lt_basket, "Doğru Efekt:"), 
+                                                  textvariable=self.level_effect_ok_display_var, state="readonly")
+        self.level_effect_ok_combo.pack(fill="x")
+        self.level_effect_ok_combo.bind("<<ComboboxSelected>>", 
+            lambda e: _on_effect_select(self.level_effect_ok_display_var, self.level_effect_ok_var, self._restart_effect_preview))
+        
+        self.level_effect_bad_combo = ttk.Combobox(_frm(lt_basket, "Yanlış Efekt:"), 
+                                                   textvariable=self.level_effect_bad_display_var, state="readonly")
+        self.level_effect_bad_combo.pack(fill="x")
+        self.level_effect_bad_combo.bind("<<ComboboxSelected>>", 
+            lambda e: _on_effect_select(self.level_effect_bad_display_var, self.level_effect_bad_var, self._restart_effect_preview))
+
+        f_fps = ttk.Frame(lt_basket); f_fps.pack(fill="x", pady=4)
+        ttk.Label(f_fps, text="FPS:").pack(side=tk.LEFT)
+        ttk.Entry(f_fps, textvariable=self.level_effect_fps_var, width=5).pack(side=tk.LEFT, padx=5)
+        ttk.Label(f_fps, text="Ölçek %:").pack(side=tk.LEFT)
+        ttk.Entry(f_fps, textvariable=self.level_effect_scale_var, width=5).pack(side=tk.LEFT, padx=5)
+        
+        # Ses
+        self.level_sfx_ok_combo = ttk.Combobox(_frm(lt_sfx, "Doğru Sesi:"), 
+                                               textvariable=self.level_sfx_ok_display_var, state="readonly")
         self.level_sfx_ok_combo.pack(fill="x")
-        lf_row3 = _form_row_container(tab_sfx, "Yanlış SFX:")
-        self.level_sfx_bad_var = tk.StringVar()
-        self.level_sfx_bad_combo = ttk.Combobox(lf_row3, textvariable=self.level_sfx_bad_var, state="readonly")
+        self.level_sfx_ok_combo.bind("<<ComboboxSelected>>", 
+             lambda e: _on_aud_select(self.level_sfx_ok_display_var, self.level_sfx_ok_var))
+        
+        self.level_sfx_bad_combo = ttk.Combobox(_frm(lt_sfx, "Yanlış Sesi:"), 
+                                                textvariable=self.level_sfx_bad_display_var, state="readonly")
         self.level_sfx_bad_combo.pack(fill="x")
+        self.level_sfx_bad_combo.bind("<<ComboboxSelected>>", 
+             lambda e: _on_aud_select(self.level_sfx_bad_display_var, self.level_sfx_bad_var))
+        
+        self.music_combo = ttk.Combobox(_frm(lt_sfx, "Müzik:"), 
+                                        textvariable=self.music_display_var, state="readonly")
+        self.music_combo.pack(fill="x")
+        self.music_combo.bind("<<ComboboxSelected>>", 
+             lambda e: _on_aud_select(self.music_display_var, self.music_path_var))
 
-        # HUD & Yardım
-        lf_row4 = _form_row_container(tab_hud, "HUD Sprite:")
-        self.level_hud_sprite_var = tk.StringVar()
-        self.level_hud_sprite_combo = ttk.Combobox(lf_row4, textvariable=self.level_hud_sprite_var, state="readonly")
+        # HUD
+        self.level_hud_sprite_combo = ttk.Combobox(_frm(lt_hud, "HUD Sprite:"), 
+                                                   textvariable=self.level_hud_display_var, state="readonly")
         self.level_hud_sprite_combo.pack(fill="x")
-        # Yardım alanı
-        lf_row5 = _form_row_container(tab_hud, "Yardım Alanı:")
-        self.level_help_area_var = tk.StringVar(value="none")
-        self.level_help_area_combo = ttk.Combobox(lf_row5, textvariable=self.level_help_area_var, state="readonly",
+        self.level_hud_sprite_combo.bind("<<ComboboxSelected>>", 
+             lambda e: _on_sprite_region_select(self.level_hud_display_var, self.level_hud_sprite_var))
+        
+        self.level_help_area_combo = ttk.Combobox(_frm(lt_hud, "Yardım Konumu:"), textvariable=self.level_help_area_var, state="readonly",
                                                   values=["none","top-left","top-right","bottom-left","bottom-right"])
         self.level_help_area_combo.pack(fill="x")
 
-        # Efektler (6x5)
-        lf_row6 = _form_row_container(tab_basket_fx, "Doğru Efekt (6x5):")
-        self.level_effect_ok_var = tk.StringVar()
-        self.level_effect_ok_combo = ttk.Combobox(lf_row6, textvariable=self.level_effect_ok_var, state="readonly")
-        self.level_effect_ok_combo.pack(fill="x")
-        self.level_effect_ok_combo.bind("<<ComboboxSelected>>", lambda e: self._restart_effect_preview())
-        lf_row7 = _form_row_container(tab_basket_fx, "Yanlış Efekt (6x5):")
-        self.level_effect_bad_var = tk.StringVar()
-        self.level_effect_bad_combo = ttk.Combobox(lf_row7, textvariable=self.level_effect_bad_var, state="readonly")
-        self.level_effect_bad_combo.pack(fill="x")
-        self.level_effect_bad_combo.bind("<<ComboboxSelected>>", lambda e: self._restart_effect_preview())
-        # Efekt Hızı (FPS) ve Ölçek (% basket uzunluğu)
-        lf_row8 = ttk.Frame(tab_basket_fx); lf_row8.pack(fill="x", pady=(6,0))
-        c1 = _form_row_container(lf_row8, "Efekt FPS:")
-        self.level_effect_fps_var = tk.StringVar(value="30")
-        e1 = ttk.Entry(c1, textvariable=self.level_effect_fps_var, width=8)
-        e1.pack(fill="x")
-        self.level_effect_fps_var.trace_add('write', lambda *args: self._restart_effect_preview())
-        c2 = _form_row_container(lf_row8, "Efekt Ölçek (%):")
-        self.level_effect_scale_var = tk.StringVar(value="60")
-        e2 = ttk.Entry(c2, textvariable=self.level_effect_scale_var, width=8)
-        e2.pack(fill="x")
-        self.level_effect_scale_var.trace_add('write', lambda *args: self._restart_effect_preview())
+        # BG
+        ttk.Button(lt_bg, text="Nesne Resimleri Seç", command=self._open_bg_region_picker).pack(fill="x", pady=5)
+        self.level_bg_preview_frame = ttk.LabelFrame(lt_bg, text="Seçili Bölgeler")
+        self.level_bg_preview_frame.pack(fill="x", expand=True)
+        self._refresh_bg_region_preview()
 
-        # Sesler sekmesine arka plan müziğini taşı
-        lf_music = _form_row_container(tab_sfx, "Arka Plan Müziği:")
-        self.music_path_var = tk.StringVar()
-        self.music_combo = ttk.Combobox(lf_music, textvariable=self.music_path_var, state="readonly")
-        self.music_combo.pack(fill="x")
-        self.music_combo.bind("<<ComboboxSelected>>", lambda e: None)
-
-        # Initially hide detail frames
+        # Initial Visibility
         self.label_frame.pack_forget()
         self.button_frame.pack_forget()
         self.sprite_frame.pack_forget()
         self.level_frame.pack_forget()
-        # Level türündeyse paneli göster ve arka plan bölge seç butonunu ekle
+        
         if (self.screen_type or "").lower() == "level":
-            self.level_frame.pack(fill="both", expand=True, pady=6)
-            # Arka Plan sekmesi içeriği
-            row_pick = ttk.Frame(tab_bg); row_pick.pack(fill="x", pady=(0,6))
-            ttk.Button(row_pick, text="Arka Plan Bölge Seç (Görsel)", command=self._open_bg_region_picker).pack(anchor="w")
-            # Seçili bölgelerin küçük önizlemeleri
-            self.level_bg_preview_frame = ttk.LabelFrame(tab_bg, text="Seçili Arka Plan Bölgeleri")
-            self.level_bg_preview_frame.pack(fill="x")
-            self._refresh_bg_region_preview()
+            self.level_frame.pack(fill="both", expand=True, pady=5)
+
 
     # Palette actions
     def _on_bg_select(self) -> None:
@@ -522,11 +726,15 @@ class ScreenDesignerWindow(tk.Toplevel):
             return
 
         # Mevcut seçimleri al
-        selected_ids: List[int] = []
+        selected_ids_set = set()
         try:
-            selected_ids = self.level_service.get_level_background_region_ids(self.level_id)  # type: ignore[attr-defined]
-        except Exception:
-            selected_ids = []
+            raw_ids = self.level_service.get_level_background_region_ids(self.level_id)  # type: ignore[attr-defined]
+            if raw_ids:
+                # Gelen ID'leri güvenli şekilde integer setine çevir (str/int uyumsuzluğunu önle)
+                selected_ids_set = {int(x) for x in raw_ids if str(x).isdigit() or isinstance(x, int)}
+        except Exception as e:
+            print(f"Seçili bölgeler alınırken hata: {e}")
+            selected_ids_set = set()
 
         # Region listesini al
         regions = []
@@ -541,79 +749,136 @@ class ScreenDesignerWindow(tk.Toplevel):
         dlg.title("Arka Plan Bölge Seçimi")
         dlg.transient(self)
         dlg.grab_set()
-        dlg.geometry("720x520")
+        dlg.geometry("950x700")
+        dlg.configure(bg="#2b2b2b")  # Koyu arka plan
 
+        # Ana kapsayıcı
         container = ttk.Frame(dlg)
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Scrollable canvas
-        canvas = tk.Canvas(container, borderwidth=0)
+        canvas = tk.Canvas(container, borderwidth=0, background="#2b2b2b", highlightthickness=0)
         vsb = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
-        frame = ttk.Frame(canvas)
+        frame = tk.Frame(canvas, bg="#2b2b2b") # İç frame de koyu olsun
+        
         frame.bind(
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
+        # Canvas window'u sol üst köşeye sabitle
         canvas.create_window((0, 0), window=frame, anchor="nw")
         canvas.configure(yscrollcommand=vsb.set)
+        
         canvas.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
 
-        thumbs: List[ImageTk.PhotoImage] = []  # referansları tut
+        # Resim referanslarını canlı tutmak için liste
+        thumbs: List[ImageTk.PhotoImage] = []
+        # ÖNEMLİ: Referansları dlg nesnesine bağla ki Garbage Collector temizlemesin
+        dlg.image_refs = thumbs 
+
         var_by_id: Dict[int, tk.BooleanVar] = {}
 
-        def abs_project(rel: str) -> Optional[str]:
-            """Proje köküne göre relatif yolu mutlak yapar."""
-            if not rel:
-                return None
-            p = rel.replace('\\','/').strip()
-            if os.path.isabs(p):
-                return p
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
-            return os.path.join(project_root, p)
-
-        # Grid halinde küçük thumbs + checkbox
-        cols = 4
+        # Sabit boyutlu kart görünümü ayarları
+        CARD_W, CARD_H = 200, 220
+        IMG_AREA_W, IMG_AREA_H = 180, 120
+        COLS = 4
+        
+        # Grid halinde kartlar
         for idx, reg in enumerate(regions):
             try:
                 rid = int(reg.get("id"))
                 img_rel = str(reg.get("image_path") or "")
                 name = str(reg.get("name") or "")
-                x = int(reg.get("x", 0)); y = int(reg.get("y", 0))
-                w = int(reg.get("width", 0)); h = int(reg.get("height", 0))
-                abs_path = abs_project(img_rel)
+                
+                # Sprite koordinatları
+                x = int(reg.get("x", 0))
+                y = int(reg.get("y", 0))
+                w = int(reg.get("width", 0))
+                h = int(reg.get("height", 0))
+                
+                abs_path = self._abs_assets_path(img_rel)
+                
+                # Kart Çerçevesi (Sabit Boyut)
+                cell = tk.Frame(frame, bg="#3c3f41", width=CARD_W, height=CARD_H, relief="flat", bd=1)
+                cell.pack_propagate(False) # İçerik kartı büyütmesin/küçültmesin
+                
+                r = idx // COLS; c = idx % COLS
+                cell.grid(row=r, column=c, padx=8, pady=8)
+
+                # 1. Resim Alanı (Canvas) - Koyu arkaplan ile
+                img_canvas = tk.Canvas(cell, width=IMG_AREA_W, height=IMG_AREA_H, bg="#212121", highlightthickness=0)
+                img_canvas.pack(pady=(10, 5))
+
                 thumb = None
-                if abs_path and os.path.isfile(abs_path) and w > 0 and h > 0:
-                    try:
-                        pil = Image.open(abs_path)
-                        iw, ih = pil.size
-                        # Kutu sınırlarını görüntü içine kırp
-                        x1 = max(0, min(iw, x)); y1 = max(0, min(ih, y))
-                        x2 = max(0, min(iw, x + w)); y2 = max(0, min(ih, y + h))
-                        if x2 > x1 and y2 > y1:
-                            pil_crop = pil.crop((x1, y1, x2, y2))
-                            tw, th = 160, 120
-                            # oranı koru
-                            scale = min(tw / max(1, pil_crop.width), th / max(1, pil_crop.height))
-                            rz = (max(1, int(pil_crop.width * scale)), max(1, int(pil_crop.height * scale)))
-                            pil_thumb = pil_crop.resize(rz, Image.LANCZOS)
-                            thumb = ImageTk.PhotoImage(pil_thumb)
-                            thumbs.append(thumb)
-                    except Exception:
-                        thumb = None
-                cell = ttk.Frame(frame, padding=6)
-                r = idx // cols; c = idx % cols
-                cell.grid(row=r, column=c, sticky="nsew")
-                if thumb:
-                    tk.Label(cell, image=thumb).pack()
-                tk.Label(cell, text=f"{name}\n{img_rel}", justify="center").pack(pady=(4,0))
-                var = tk.BooleanVar(value=(rid in selected_ids))
+                error_text = None
+                
+                if abs_path and os.path.isfile(abs_path):
+                    if w > 0 and h > 0:
+                        try:
+                            pil = Image.open(abs_path)
+                            iw, ih = pil.size
+                            
+                            # Sprite sheet içindeki bölgeyi güvenli şekilde belirle
+                            x1 = max(0, min(iw, x))
+                            y1 = max(0, min(ih, y))
+                            x2 = max(0, min(iw, x + w))
+                            y2 = max(0, min(ih, y + h))
+                            
+                            if x2 > x1 and y2 > y1:
+                                pil_crop = pil.crop((x1, y1, x2, y2))
+                                
+                                # Oranı koruyarak sığdır
+                                src_w, src_h = pil_crop.size
+                                ratio = min(IMG_AREA_W / src_w, IMG_AREA_H / src_h)
+                                new_w = max(1, int(src_w * ratio))
+                                new_h = max(1, int(src_h * ratio))
+                                
+                                pil_thumb = pil_crop.resize((new_w, new_h), Image.LANCZOS)
+                                thumb = ImageTk.PhotoImage(pil_thumb)
+                                thumbs.append(thumb) # Listeye ekle
+                                
+                                # Canvas ortasına çiz
+                                cx = IMG_AREA_W / 2
+                                cy = IMG_AREA_H / 2
+                                img_canvas.create_image(cx, cy, anchor="center", image=thumb)
+                            else:
+                                error_text = "Boş Bölge"
+                        except Exception as e:
+                            print(f"Resim yükleme hatası ({name}): {e}")
+                            error_text = "Yükleme Hatası"
+                    else:
+                        error_text = "Geçersiz Boyut"
+                else:
+                     error_text = "Dosya Yok"
+
+                if error_text:
+                    img_canvas.create_text(IMG_AREA_W/2, IMG_AREA_H/2, text=error_text, fill="#666", font=("Segoe UI", 9))
+
+                # 2. Bilgi ve Seçim
+                # İsim (Kısaltılmış)
+                disp_name = (name[:20] + '..') if len(name) > 20 else name
+                tk.Label(cell, text=disp_name, bg="#3c3f41", fg="white", font=("Segoe UI", 9, "bold")).pack()
+                
+                # Yol (Kısaltılmış)
+                short_path = os.path.basename(img_rel)
+                tk.Label(cell, text=short_path, bg="#3c3f41", fg="#aaaaaa", font=("Segoe UI", 8)).pack()
+
+                # Checkbox
+                var = tk.BooleanVar(value=(rid in selected_ids_set))
                 var_by_id[rid] = var
-                ttk.Checkbutton(cell, text="Seç", variable=var).pack(pady=(2,0))
+                chk = ttk.Checkbutton(cell, text="Seç", variable=var)
+                chk.pack(pady=(5,0))
+                
+                # Tüm hücreye tıklayınca seçimi tersine çevir (isteğe bağlı UX iyileştirmesi)
+                # Ancak checkbox'ın kendi event'iyle çakışabilir, şimdilik sadece checkbox.
+
             except Exception:
                 continue
 
         # Actions
-        action = ttk.Frame(dlg); action.pack(fill="x", pady=(8,0))
+        action = ttk.Frame(dlg)
+        action.pack(fill="x", side="bottom", pady=10, padx=10)
+        
         def on_ok():
             try:
                 chosen = [rid for rid, v in var_by_id.items() if v.get()]
@@ -626,7 +891,8 @@ class ScreenDesignerWindow(tk.Toplevel):
                 dlg.destroy()
             except Exception as e:
                 messagebox.showerror("Hata", f"Kaydedilemedi: {e}", parent=dlg)
-        ttk.Button(action, text="Kaydet", command=on_ok).pack(side=tk.RIGHT, padx=6)
+        
+        ttk.Button(action, text="Kaydet", command=on_ok, style="Accent.TButton").pack(side=tk.RIGHT, padx=6)
         ttk.Button(action, text="İptal", command=dlg.destroy).pack(side=tk.RIGHT)
 
     def _refresh_bg_region_preview(self) -> None:
@@ -956,40 +1222,74 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._audios = audios
         self._background_images = background_images
 
+        # Mappingleri temizle
         self._bg_display_to_path.clear()
         self._bg_path_to_display.clear()
-        display_values: List[str] = []
-        base_counts = Counter(os.path.basename(p) or p for p in background_images)
+        self._img_display_map = {}
+        self._img_path_map = {}
+        self._audio_display_map = {}
+        self._audio_path_map = {}
+
+        # Helper to fill map
+        def fill_map(file_list, d_map, p_map):
+            counts = Counter(os.path.basename(p) or p for p in file_list)
+            display_list = []
+            for rel in file_list:
+                base = os.path.basename(rel) or rel
+                label = base
+                if counts[base] > 1:
+                    parent = os.path.basename(os.path.dirname(rel)) or os.path.dirname(rel)
+                    if parent:
+                        label = f"{base} ({parent})"
+                # Unique garantisi
+                orig_label = label
+                idx = 2
+                while label in d_map:
+                    label = f"{orig_label} [{idx}]"
+                    idx += 1
+                
+                d_map[label] = rel
+                p_map[rel] = label
+                display_list.append(label)
+            return display_list
+
+        # Görseller (Image Assets)
+        img_display_values = fill_map(images, self._img_display_map, self._img_path_map)
+        # Sesler (Audio Assets)
+        aud_display_values = fill_map(audios, self._audio_display_map, self._audio_path_map)
+
+        # Arka Plan (Sadece background klasöründekiler için ayrı map'i de doldur, uyumluluk için)
+        background_display_values = []
+        bg_counts = Counter(os.path.basename(p) or p for p in background_images)
         for rel in background_images:
             base = os.path.basename(rel) or rel
             label = base
-            if base_counts[base] > 1:
+            if bg_counts[base] > 1:
                 parent = os.path.basename(os.path.dirname(rel)) or os.path.dirname(rel)
                 if parent:
                     label = f"{base} ({parent})"
             unique_label = self._make_unique_bg_label(label)
             self._bg_display_to_path[unique_label] = rel
             self._bg_path_to_display[rel] = unique_label
-            display_values.append(unique_label)
+            background_display_values.append(unique_label)
 
-        self.bg_combo['values'] = display_values
-        self.music_combo['values'] = audios
-        # Level efekt ve sprite combobox'larını da doldur
+        self.bg_combo['values'] = background_display_values
+        self.music_combo['values'] = aud_display_values
+        
+        # Level comboboxları
         try:
-            self.level_basket_sprite_combo['values'] = images
-        except Exception:
-            pass
+            self.level_basket_sprite_combo['values'] = img_display_values
+        except Exception: pass
         try:
-            self.level_hud_sprite_combo['values'] = images
-        except Exception:
-            pass
+            self.level_hud_sprite_combo['values'] = img_display_values
+        except Exception: pass
         try:
-            if hasattr(self, 'level_effect_ok_combo'):
-                self.level_effect_ok_combo['values'] = images
-            if hasattr(self, 'level_effect_bad_combo'):
-                self.level_effect_bad_combo['values'] = images
-        except Exception:
-            pass
+             # SFX Combos
+            if hasattr(self, 'level_sfx_ok_combo'):
+                self.level_sfx_ok_combo['values'] = aud_display_values
+            if hasattr(self, 'level_sfx_bad_combo'):
+                self.level_sfx_bad_combo['values'] = aud_display_values
+        except Exception: pass
 
         # Varsayılan seçimleri doldur
         if background_images and not self.bg_path_var.get():
@@ -997,8 +1297,48 @@ class ScreenDesignerWindow(tk.Toplevel):
             abs_bg0 = self._abs_assets_path(background_images[0])
             if abs_bg0 and os.path.isfile(abs_bg0):
                 self._apply_canvas_bg(abs_bg0)
-        if audios and not self.music_path_var.get():
-            self.music_path_var.set(audios[0])
+        
+        # Mevcut path değerlerine göre display değerlerini güncelle
+        self._refresh_display_vars()
+
+    def _refresh_display_vars(self):
+        """Path değişkenlerindeki yollara göre Display değişkenlerini günceller."""
+        try:
+            # Helper
+            def _upd(d_var, p_var, p_map):
+                path = p_var.get()
+                if path and path in p_map:
+                    d_var.set(p_map[path])
+                elif path: # Map'te yoksa path göster
+                    d_var.set(path)
+
+            # Image bazlılar
+            _upd(self.level_basket_display_var, self.level_basket_sprite_var, self._img_path_map)
+            _upd(self.level_hud_display_var, self.level_hud_sprite_var, self._img_path_map)
+            # Efekt display değerleri için öncelikle image_path -> efekt ismi eşlemesini kullan
+            try:
+                img_to_name = getattr(self, "_effect_image_to_name", {}) or {}
+                ok_path = (self.level_effect_ok_var.get() or "").strip()
+                bad_path = (self.level_effect_bad_var.get() or "").strip()
+                if ok_path and ok_path in img_to_name:
+                    self.level_effect_ok_display_var.set(img_to_name[ok_path])
+                else:
+                    _upd(self.level_effect_ok_display_var, self.level_effect_ok_var, self._img_path_map)
+                if bad_path and bad_path in img_to_name:
+                    self.level_effect_bad_display_var.set(img_to_name[bad_path])
+                else:
+                    _upd(self.level_effect_bad_display_var, self.level_effect_bad_var, self._img_path_map)
+            except Exception:
+                _upd(self.level_effect_ok_display_var, self.level_effect_ok_var, self._img_path_map)
+                _upd(self.level_effect_bad_display_var, self.level_effect_bad_var, self._img_path_map)
+            
+            # Audio bazlılar
+            _upd(self.level_sfx_ok_display_var, self.level_sfx_ok_var, self._audio_path_map)
+            _upd(self.level_sfx_bad_display_var, self.level_sfx_bad_var, self._audio_path_map)
+            _upd(self.music_display_var, self.music_path_var, self._audio_path_map)
+            
+        except Exception:
+            pass
 
     def _abs_assets_path(self, rel: str) -> Optional[str]:
         if not rel:
@@ -1409,12 +1749,16 @@ class ScreenDesignerWindow(tk.Toplevel):
             pass
         self.button_sprite_combo['values'] = sorted(vals, key=lambda s: s.lower())
         self.image_sprite_combo['values'] = sorted(vals, key=lambda s: s.lower())
-        # Level panelindeki sprite seçimleri de aynı değerleri kullanır
+        # Level panelindeki sprite seçimleri sadece tanımlı sprite bölgelerini göstersin
         try:
-            self.level_basket_sprite_combo['values'] = sorted(vals, key=lambda s: s.lower())
-            self.level_hud_sprite_combo['values'] = sorted(vals, key=lambda s: s.lower())
-            self.level_sfx_ok_combo['values'] = self._audios
-            self.level_sfx_bad_combo['values'] = self._audios
+            # Sadece sprite bölgelerini kullan (dosyaları karıştırma)
+            sprite_vals = sorted(vals, key=lambda s: s.lower())
+            self.level_basket_sprite_combo['values'] = sprite_vals
+            self.level_hud_sprite_combo['values'] = sprite_vals
+            
+            # SFX comboboxları
+            # self.level_sfx_ok_combo['values'] = self._audios
+            # self.level_sfx_bad_combo['values'] = self._audios
         except Exception:
             pass
 
@@ -1588,23 +1932,31 @@ class ScreenDesignerWindow(tk.Toplevel):
                 if (self.screen_type or "").lower() == "level":
                     lv = data.get("level_settings") or {}
                     if lv:
-                        if lv.get("basket_sprite") and lv.get("basket_sprite") in (self.level_basket_sprite_combo['values'] or ()): 
+                        # Basket
+                        if lv.get("basket_sprite"):
                             self.level_basket_sprite_var.set(lv.get("basket_sprite"))
                         if "basket_length" in lv:
                             self.level_basket_len_var.set(str(lv.get("basket_length") or ""))
-                        if lv.get("sfx_correct") and lv.get("sfx_correct") in (self._audios if hasattr(self, "_audios") else []):
+                        
+                        # SFX
+                        if lv.get("sfx_correct"):
                             self.level_sfx_ok_var.set(lv.get("sfx_correct"))
-                        if lv.get("sfx_wrong") and lv.get("sfx_wrong") in (self._audios if hasattr(self, "_audios") else []):
+                        if lv.get("sfx_wrong"):
                             self.level_sfx_bad_var.set(lv.get("sfx_wrong"))
-                        if lv.get("hud_sprite") and lv.get("hud_sprite") in (self.level_hud_sprite_combo['values'] or ()): 
+                        
+                        # HUD
+                        if lv.get("hud_sprite"):
                             self.level_hud_sprite_var.set(lv.get("hud_sprite"))
                         if lv.get("help_area"):
                             self.level_help_area_var.set(str(lv.get("help_area")))
-                        if lv.get("effect_correct_sheet") and lv.get("effect_correct_sheet") in (self._images if hasattr(self, "_images") else []):
+                        
+                        # Effects
+                        if lv.get("effect_correct_sheet"):
                             self.level_effect_ok_var.set(lv.get("effect_correct_sheet"))
-                        if lv.get("effect_wrong_sheet") and lv.get("effect_wrong_sheet") in (self._images if hasattr(self, "_images") else []):
+                        if lv.get("effect_wrong_sheet"):
                             self.level_effect_bad_var.set(lv.get("effect_wrong_sheet"))
-                        # Yeni: FPS ve Ölçek
+                        
+                        # FPS ve Ölçek
                         if "effect_fps" in lv:
                             try:
                                 self.level_effect_fps_var.set(str(int(lv.get("effect_fps") or 30)))
@@ -1615,6 +1967,13 @@ class ScreenDesignerWindow(tk.Toplevel):
                                 self.level_effect_scale_var.set(str(int(lv.get("effect_scale_percent") or 60)))
                             except Exception:
                                 pass
+
+                    # Path değişkenlerini Display değişkenlerine (dosya adına) çevir
+                    self._refresh_display_vars()
+
+                    # EffectService ile kayıtlı efektleri yükle
+                    self._load_effects_for_game()
+
                     # Mevcut veriyi yükledikten sonra önizlemeleri göster
                     self.after(100, self._update_basket_preview)  # UI'nin çizilmesini bekle
                     self.after(120, self._update_item_bg_preview)
@@ -1766,7 +2125,7 @@ class ScreenDesignerWindow(tk.Toplevel):
             return
 
         key = self.level_basket_sprite_var.get().strip()
-        if not key or " — " not in key:
+        if not key:
             self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
             return
 
@@ -1779,13 +2138,23 @@ class ScreenDesignerWindow(tk.Toplevel):
             self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
             return
 
-        name, image_rel = key.split(" — ", 1)
-        entry = self._find_sprite_region(image_rel, name)
-        if not entry:
-            self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
-            return
+        pil_crop = None
 
-        pil_crop = self._load_crop_image(entry)
+        # Eğer " — " içeriyorsa sprite region'dır
+        if " — " in key:
+            name, image_rel = key.split(" — ", 1)
+            entry = self._find_sprite_region(image_rel, name)
+            if entry:
+                pil_crop = self._load_crop_image(entry)
+        else:
+            # Değilse doğrudan dosya yoludur
+            abs_path = self._abs_assets_path(key)
+            if abs_path and os.path.isfile(abs_path):
+                try:
+                    pil_crop = Image.open(abs_path)
+                except Exception:
+                    pass
+
         if not pil_crop:
             self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
             return
@@ -1819,10 +2188,11 @@ class ScreenDesignerWindow(tk.Toplevel):
             pass
 
     def _restart_effect_preview(self) -> None:
-        """Seçili efekt sheet'lerini okuyup 6x5 karelere böler ve sepet üzerinde animasyon olarak oynatır.
+        """Seçili efektleri sepet üzerinde animasyon olarak oynatır.
 
-        - Ok ve yanlış efekt sheet'leri varsa sırayla döngüsel gösterilir.
-        - Sepet önizlemesinin konumuna göre efekt üstte merkezlenecek şekilde yerleştirilir.
+        Öncelik sırası:
+        - Eğer EffectService ile yüklenmiş bir efekt parametresi (image_path + frames) varsa, kareler buradan üretilir.
+        - Aksi halde, eski davranış korunarak efekt sheet'i 6x5 sabit grid ile bölünür.
         """
         # Yalnızca level ekranında çalış
         if (self.screen_type or "").lower() != "level":
@@ -1833,13 +2203,72 @@ class ScreenDesignerWindow(tk.Toplevel):
         # Önce eski zamanlayıcıyı durdur
         self._stop_effect_preview()
 
-        # Seçimleri oku
+        # Seçilen efekt İSİMLERİNİ ve image path'lerini oku
+        ok_name = (self.level_effect_ok_display_var.get() or "").strip()
+        bad_name = (self.level_effect_bad_display_var.get() or "").strip()
         ok_rel = (self.level_effect_ok_var.get() or "").strip()
         bad_rel = (self.level_effect_bad_var.get() or "").strip()
 
-        # Frame listelerini hazırla
-        self._effect_frames_ok = self._slice_effect_sheet(ok_rel) if ok_rel else []
-        self._effect_frames_bad = self._slice_effect_sheet(bad_rel) if bad_rel else []
+        params_map = getattr(self, "_effect_name_to_params", {}) or {}
+
+        def _build_frames_from_params(name: str, fallback_rel: str) -> list[ImageTk.PhotoImage]:
+            params = params_map.get(name)
+            if not params:
+                # Herhangi bir parametre eşleşmesi yoksa sheet fallback'ine dön
+                return self._slice_effect_sheet(fallback_rel) if fallback_rel else []
+            img_rel = (params.get("image_path") or "").strip() or fallback_rel
+            if not img_rel:
+                return []
+            abs_path = self._abs_assets_path(img_rel)
+            if not abs_path or not os.path.isfile(abs_path):
+                return []
+            try:
+                sheet = Image.open(abs_path)
+            except Exception:
+                return []
+            frames_conf = params.get("frames") or []
+            if not isinstance(frames_conf, list) or not frames_conf:
+                # Kare listesi yoksa tekrar sheet fallback'i dene
+                return self._slice_effect_sheet(img_rel)
+
+            # Hedef genişlik: sepet uzunluğunun %scale'i (mevcut davranışla uyumlu)
+            try:
+                basket_len = max(1, int(self.level_basket_len_var.get() or "128"))
+            except Exception:
+                basket_len = 128
+            try:
+                scale_pct = int(self.level_effect_scale_var.get() or "60")
+            except Exception:
+                scale_pct = 60
+            scale_pct = max(10, min(200, scale_pct))
+            target_w = max(16, int(self._to_canvas(int(basket_len * scale_pct / 100.0))))
+
+            frames: list[ImageTk.PhotoImage] = []
+            for fr in frames_conf:
+                try:
+                    x = int(fr.get("x", 0))
+                    y = int(fr.get("y", 0))
+                    w = int(fr.get("w", 0))
+                    h = int(fr.get("h", 0))
+                    if w <= 0 or h <= 0:
+                        continue
+                    crop = sheet.crop((x, y, x + w, y + h))
+                    # Ölçekle (oranı koru)
+                    scale = target_w / max(1, crop.width)
+                    rw = max(1, int(crop.width * scale))
+                    rh = max(1, int(crop.height * scale))
+                    crop = crop.resize((rw, rh), Image.LANCZOS)
+                    frames.append(ImageTk.PhotoImage(crop))
+                except Exception:
+                    continue
+            if frames:
+                return frames
+            # Kare üretilmediyse son çare olarak sheet fallback'i kullan
+            return self._slice_effect_sheet(img_rel)
+
+        # Frame listelerini hazırla (önce parametre tabanlı, sonra fallback)
+        self._effect_frames_ok = _build_frames_from_params(ok_name, ok_rel) if (ok_name or ok_rel) else []
+        self._effect_frames_bad = _build_frames_from_params(bad_name, bad_rel) if (bad_name or bad_rel) else []
 
         # Hiçbiri yoksa gizle ve çık
         if not self._effect_frames_ok and not self._effect_frames_bad:

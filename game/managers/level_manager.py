@@ -109,19 +109,20 @@ class LevelManager:
         self.wrong_answer_percentage: int = 40
     
     def setup_level(self, level_number: int, game_id: int):
-        """Set up a new level with the given level number.
+        """Belirtilen numara ile yeni bir seviye kurulumu yapar.
 
         Doc:
-            - Loads level rows and expressions from the DB.
-            - Reads game-level defaults from `game_settings` and applies them to
-              internal parameters such as item speed and wrong percentage.
+            - DB'den seviye satırını ve ifadeleri (expressions) yükler.
+            - Seviye tablosundaki `item_speed`, `wrong_answer_percentage` ve
+              `max_items_on_screen` değerlerini uygular.
+            - Bu değerler artık global ayarlarla ezilmez, tasarım ekranındaki değerler esastır.
 
         Args:
-            level_number: The level number to set up.
-            game_id: Active game id.
+            level_number: Kurulacak seviye numarası.
+            game_id: Aktif oyun id'si.
 
         Raises:
-            KeyError: If the level number is invalid.
+            KeyError: Eğer seviye numarası geçersizse.
         """
         self.level = level_number
         self.game_id = game_id
@@ -129,7 +130,6 @@ class LevelManager:
         level_data = self.db.get_level_data(game_id, level_number)
         if not level_data:
             print(f"Error: Level {level_number} for game {game_id} not found in database.")
-            # Handle this case, e.g., by ending the game or loading a default.
             return
 
         level_id = level_data['id']
@@ -150,24 +150,31 @@ class LevelManager:
         self.total_items_to_spawn = 0
         self.spawn_ready = False
         
-        # debug log kaldırıldı
-
-        # Apply per-game settings (optional, with fallbacks)
+        # ----------------------------------------------------------------------
+        # FIX: Seviye ayarlarını doğrudan level_data'dan al.
+        # Global ayarlar (game_settings) yerine, her seviyenin kendi tasarımını kullan.
+        # ----------------------------------------------------------------------
         try:
-            settings_map = Database().get_game_settings(game_id) or {}
-            # parse with safe fallbacks
-            self.item_speed = float(settings_map.get('default_item_speed', 3.0))
-            # Bound speed to a sane range
+            # Veritabanından gelen değerleri güvenli bir şekilde al ve dönüştür
+            self.item_speed = float(level_data['item_speed']) if level_data['item_speed'] is not None else 3.0
+            self.max_items_on_screen = int(level_data['max_items_on_screen']) if level_data['max_items_on_screen'] is not None else 5
+            self.wrong_answer_percentage = int(level_data['wrong_answer_percentage']) if level_data['wrong_answer_percentage'] is not None else 40
+            
+            # Sınır kontrolleri
             if self.item_speed <= 0:
                 self.item_speed = 3.0
-            self.max_items_on_screen = int(settings_map.get('default_max_items', 5))
             if self.max_items_on_screen < 1:
                 self.max_items_on_screen = 5
-            self.wrong_answer_percentage = int(settings_map.get('default_wrong_percentage', 40))
             self.wrong_answer_percentage = max(0, min(100, self.wrong_answer_percentage))
-        except Exception as _:
-            # keep defaults
-            pass
+            
+            print(f"[LevelManager] Setup Level {level_number}: Speed={self.item_speed}, "
+                  f"Wrong%={self.wrong_answer_percentage}, MaxItems={self.max_items_on_screen}")
+
+        except Exception as e:
+            print(f"[LevelManager] Error loading level settings: {e}. Using defaults.")
+            self.item_speed = 3.0
+            self.max_items_on_screen = 5
+            self.wrong_answer_percentage = 40
     
     def get_new_item(self) -> Tuple[str, str]:
         """Get a new item for the current level.
