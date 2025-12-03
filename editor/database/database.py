@@ -190,6 +190,37 @@ class DatabaseManager:
             FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE,
             UNIQUE (game_id, name)
         )''')
+
+        # Create effect_sheets table for structured sprite-sheet based effects
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS effect_sheets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            sheet_path TEXT NOT NULL,
+            cols INTEGER NOT NULL,
+            rows INTEGER NOT NULL,
+            scale REAL NOT NULL,
+            fps INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE,
+            UNIQUE (game_id, name)
+        )''')
+
+        # Create effect_sheet_regions table to store per-effect sheet regions (one-to-many)
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS effect_sheet_regions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            effect_id INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            width INTEGER NOT NULL,
+            height INTEGER NOT NULL,
+            order_index INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (effect_id) REFERENCES effect_sheets (id) ON DELETE CASCADE
+        )''')
     
     def _initialize_default_data(self, cursor: sqlite3.Cursor) -> None:
         """Initialize default game and settings."""
@@ -232,6 +263,8 @@ class DatabaseManager:
         - effect_wrong_sheet TEXT
         - effect_fps INTEGER DEFAULT 30
         - effect_scale_percent INTEGER DEFAULT 60
+        - effect_correct_sheet_id INTEGER
+        - effect_wrong_sheet_id INTEGER
 
         This method is safe to call repeatedly; it inspects existing columns
         via PRAGMA and only issues ALTER TABLE statements for missing ones.
@@ -248,6 +281,15 @@ class DatabaseManager:
                 alters.append("ALTER TABLE levels ADD COLUMN effect_fps INTEGER DEFAULT 30")
             if 'effect_scale_percent' not in cols:
                 alters.append("ALTER TABLE levels ADD COLUMN effect_scale_percent INTEGER DEFAULT 60")
+            if 'effect_correct_sheet_id' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_correct_sheet_id INTEGER")
+            if 'effect_wrong_sheet_id' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_wrong_sheet_id INTEGER")
+            # New effect IDs for frame sequence effects (referencing 'effects' table)
+            if 'effect_correct_id' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_correct_id INTEGER")
+            if 'effect_wrong_id' not in cols:
+                alters.append("ALTER TABLE levels ADD COLUMN effect_wrong_id INTEGER")
             for sql in alters:
                 cursor.execute(sql)
         except Exception:
@@ -305,6 +347,20 @@ class DatabaseManager:
                 level_data.get('max_items_on_screen', 5),
                 level_id
             ))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_level_effect_ids(self, level_id: int, correct_id: Optional[int], wrong_id: Optional[int]) -> bool:
+        """Update the effect IDs for a level."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE levels 
+                SET effect_correct_id = ?,
+                    effect_wrong_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (correct_id, wrong_id, level_id))
             conn.commit()
             return cursor.rowcount > 0
     
@@ -483,8 +539,11 @@ class DatabaseManager:
             return cursor.rowcount > 0
 
     # Effects operations
-    def add_effect(self, game_id: int, name: str, type_: str, params_json: str) -> int:
-        """Add a new effect configuration."""
+    def add_effect(self, name: str, type_: str, params_json: str, game_id: int = 0) -> int:
+        """Add a new effect configuration.
+        
+        Note: game_id is kept for compatibility but defaults to 0 (Global).
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -494,24 +553,51 @@ class DatabaseManager:
             conn.commit()
             return cursor.lastrowid
 
-    def get_effects(self, game_id: int) -> List[sqlite3.Row]:
-        """List all effects for a given game."""
+    def get_effects(self, game_id: int = 0) -> List[sqlite3.Row]:
+        """List all effects.
+        
+        Ignores game_id to treat effects as global assets.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM effects WHERE game_id = ? ORDER BY name', (game_id,))
+            cursor.execute('SELECT * FROM effects ORDER BY name')
             return cursor.fetchall()
 
-    def get_effect(self, game_id: int, name: str) -> Optional[sqlite3.Row]:
-        """Get an effect by name."""
+    def get_effect(self, name: str, game_id: int = 0) -> Optional[sqlite3.Row]:
+        """Get an effect by name.
+        
+        Ignores game_id filter.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM effects WHERE game_id = ? AND name = ?', (game_id, name))
+            cursor.execute('SELECT * FROM effects WHERE name = ?', (name,))
             return cursor.fetchone()
 
-    def delete_effect(self, game_id: int, name: str) -> bool:
-        """Delete an effect by name."""
+    def update_effect(self, effect_id: int, name: str, type_: str, params_json: str, game_id: int = 0) -> bool:
+        """Update an existing effect.
+        
+        Ignores game_id filter.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM effects WHERE game_id = ? AND name = ?', (game_id, name))
+            cursor.execute('''
+                UPDATE effects 
+                SET name = ?,
+                    type = ?,
+                    params_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (name, type_, params_json, effect_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_effect(self, name: str, game_id: int = 0) -> bool:
+        """Delete an effect by name.
+        
+        Ignores game_id filter.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM effects WHERE name = ?', (name,))
             conn.commit()
             return cursor.rowcount > 0

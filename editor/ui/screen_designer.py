@@ -121,6 +121,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         # EffectService tabanlı efekt tanımları için haritalar
         self._effect_name_to_params: Dict[str, Dict[str, Any]] = {}
         self._effect_image_to_name: Dict[str, str] = {}
+        self._effect_name_to_id: Dict[str, int] = {}
 
         # UI Değişkenleri (Erken Tanım)
         self.zoom_var = tk.StringVar(value="100%")
@@ -556,12 +557,19 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.level_basket_len_var.trace_add('write', lambda *args: self._update_basket_preview())
         ttk.Entry(_frm(lt_basket, "Sepet Genişlik:"), textvariable=self.level_basket_len_var).pack(fill="x")
 
-        # Efektler
+        # Efektler Başlığı ve Yenile Butonu
+        f_eff_header = ttk.Frame(lt_basket)
+        f_eff_header.pack(fill="x", pady=(5, 0))
+        ttk.Label(f_eff_header, text="Efektler:", style="Subheader.TLabel").pack(side=tk.LEFT)
+        ttk.Button(f_eff_header, text="⟳", width=3, command=self._load_effects_for_game).pack(side=tk.RIGHT)
+
         self.level_effect_ok_combo = ttk.Combobox(_frm(lt_basket, "Doğru Efekt:"), 
                                                   textvariable=self.level_effect_ok_display_var, state="readonly")
         self.level_effect_ok_combo.pack(fill="x")
         self.level_effect_ok_combo.bind("<<ComboboxSelected>>", 
             lambda e: _on_effect_select(self.level_effect_ok_display_var, self.level_effect_ok_var, self._restart_effect_preview))
+        # Dropdown açıldığında listeyi yenilemeyi dene (opsiyonel, ama buton daha güvenli)
+        self.level_effect_ok_combo.bind("<Button-1>", lambda e: self._load_effects_for_game() if not self.level_effect_ok_combo['values'] else None)
         
         self.level_effect_bad_combo = ttk.Combobox(_frm(lt_basket, "Yanlış Efekt:"), 
                                                    textvariable=self.level_effect_bad_display_var, state="readonly")
@@ -1315,20 +1323,39 @@ class ScreenDesignerWindow(tk.Toplevel):
             # Image bazlılar
             _upd(self.level_basket_display_var, self.level_basket_sprite_var, self._img_path_map)
             _upd(self.level_hud_display_var, self.level_hud_sprite_var, self._img_path_map)
+            
             # Efekt display değerleri için öncelikle image_path -> efekt ismi eşlemesini kullan
             try:
                 img_to_name = getattr(self, "_effect_image_to_name", {}) or {}
+                
+                def _resolve_effect_name(path_val):
+                    if not path_val: return ""
+                    path_val = path_val.strip().replace('\\', '/')
+                    
+                    # 1. Tam eşleşme
+                    if path_val in img_to_name:
+                        return img_to_name[path_val]
+                    
+                    # 2. assets/ ile başlıyorsa veya başlamıyorsa dene
+                    alt_1 = f"assets/{path_val}" if not path_val.startswith("assets/") else path_val
+                    if alt_1 in img_to_name:
+                        return img_to_name[alt_1]
+                        
+                    # 3. Sadece dosya adı
+                    base = os.path.basename(path_val)
+                    if base in img_to_name:
+                        return img_to_name[base]
+                        
+                    return path_val # Eşleşme yoksa path'i göster
+
                 ok_path = (self.level_effect_ok_var.get() or "").strip()
                 bad_path = (self.level_effect_bad_var.get() or "").strip()
-                if ok_path and ok_path in img_to_name:
-                    self.level_effect_ok_display_var.set(img_to_name[ok_path])
-                else:
-                    _upd(self.level_effect_ok_display_var, self.level_effect_ok_var, self._img_path_map)
-                if bad_path and bad_path in img_to_name:
-                    self.level_effect_bad_display_var.set(img_to_name[bad_path])
-                else:
-                    _upd(self.level_effect_bad_display_var, self.level_effect_bad_var, self._img_path_map)
+                
+                self.level_effect_ok_display_var.set(_resolve_effect_name(ok_path))
+                self.level_effect_bad_display_var.set(_resolve_effect_name(bad_path))
+                
             except Exception:
+                # Hata durumunda fallback
                 _upd(self.level_effect_ok_display_var, self.level_effect_ok_var, self._img_path_map)
                 _upd(self.level_effect_bad_display_var, self.level_effect_bad_var, self._img_path_map)
             
@@ -1897,12 +1924,90 @@ class ScreenDesignerWindow(tk.Toplevel):
                 pass
         return data
 
+    def _load_effects_for_game(self) -> None:
+        """Tanımlı efektleri (EffectService) yükler ve UI'yi hazırlar (Global)."""
+        if not getattr(self, 'effect_service', None):
+            print(f"[DesignerDBG] Effect service eksik.")
+            return
+        try:
+            print(f"[DesignerDBG] Efektler yükleniyor... (Global)")
+            # game_id=0 veya herhangi bir int, service içinde yoksayılıyor artık
+            effects = self.effect_service.get_effects(0)
+            print(f"[DesignerDBG] Bulunan efekt sayısı: {len(effects)}")
+            
+            # Temizle
+            self._effect_name_to_params.clear()
+            self._effect_image_to_name.clear()
+            self._effect_name_to_id.clear()
+            
+            names = []
+            for eff in effects:
+                name = eff.name
+                eid = eff.id
+                names.append(name)
+                try:
+                    # params_json string -> dict
+                    params = json.loads(eff.params_json)
+                    self._effect_name_to_params[name] = params
+                    self._effect_name_to_id[name] = eid
+                    
+                    # Ters harita: image_path -> name (varsa)
+                    path = params.get("image_path")
+                    if path:
+                        # Normalize: sadece boşlukları al, olduğu gibi sakla
+                        norm_path = path.strip().replace('\\', '/')
+                        self._effect_image_to_name[norm_path] = name
+                        
+                        # Alternatif: eğer path 'assets/' ile başlamıyorsa başına ekleyerek de sakla
+                        if not norm_path.startswith("assets/"):
+                             self._effect_image_to_name[f"assets/{norm_path}"] = name
+                        
+                        # Alternatif 2: proje kökünden bağımsız sadece dosya adı
+                        self._effect_image_to_name[os.path.basename(norm_path)] = name
+
+                except Exception as e:
+                    print(f"[DesignerDBG] Efekt parse hatası ({name}): {e}")
+                    continue
+            
+            # Combobox değerlerini güncelle
+            sorted_names = sorted(names)
+            print(f"[DesignerDBG] Combobox'a eklenecek isimler: {sorted_names}")
+            
+            if hasattr(self, 'level_effect_ok_combo'):
+                self.level_effect_ok_combo['values'] = sorted_names
+                print("[DesignerDBG] OK Combo güncellendi.")
+            
+            if hasattr(self, 'level_effect_bad_combo'):
+                self.level_effect_bad_combo['values'] = sorted_names
+                print("[DesignerDBG] BAD Combo güncellendi.")
+            
+            # Mevcut seçimlerin display değerlerini (Path -> Name) güncelle
+            self._refresh_display_vars()
+            
+        except Exception as e:
+            print(f"Efektler yüklenemedi: {e}")
+
     def _save(self) -> None:
         """JSON'u DB'ye kaydeder (screens.name='opening')."""
         try:
             data = self._collect_json()
             payload = json.dumps(data, ensure_ascii=False, indent=2)
             self.screen_service.upsert_screen(self.game_id, self.screen_name, self.screen_type, payload)
+            
+            # Eğer bu bir Level ekranıysa ve level_id biliniyorsa, efekt ID'lerini de güncelle
+            if (self.screen_type or "").lower() == "level" and self.level_id:
+                # Efekt isimlerinden ID'leri bul
+                ok_name = self.level_effect_ok_display_var.get()
+                bad_name = self.level_effect_bad_display_var.get()
+                
+                ok_id = self._effect_name_to_id.get(ok_name)
+                bad_id = self._effect_name_to_id.get(bad_name)
+                
+                # DB Manager üzerinden update
+                # screen_service.db -> DatabaseManager
+                if hasattr(self.screen_service, 'db'):
+                    self.screen_service.db.update_level_effect_ids(self.level_id, ok_id, bad_id)
+                    
             messagebox.showinfo("Kayıt", "Açılış ekranı kaydedildi.")
         except Exception as e:
             messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
@@ -1970,9 +2075,6 @@ class ScreenDesignerWindow(tk.Toplevel):
 
                     # Path değişkenlerini Display değişkenlerine (dosya adına) çevir
                     self._refresh_display_vars()
-
-                    # EffectService ile kayıtlı efektleri yükle
-                    self._load_effects_for_game()
 
                     # Mevcut veriyi yükledikten sonra önizlemeleri göster
                     self.after(100, self._update_basket_preview)  # UI'nin çizilmesini bekle

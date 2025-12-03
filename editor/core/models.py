@@ -254,3 +254,59 @@ class Effect:
             created_at=datetime.fromisoformat(data['created_at']),
             updated_at=datetime.fromisoformat(data['updated_at'])
         )
+
+
+@dataclass
+class EffectSheet:
+    """Represents a reusable sprite-sheet based effect definition."""
+    id: int
+    game_id: int
+    name: str
+    sheet_path: str
+    cols: int
+    rows: int
+    scale: float
+    fps: int
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EffectSheet':
+        return cls(
+            id=data['id'],
+            game_id=data['game_id'],
+            name=data['name'],
+            sheet_path=data['sheet_path'],
+            cols=int(data['cols']),
+            rows=int(data['rows']),
+            scale=float(data['scale']),
+            fps=int(data['fps']),
+            created_at=datetime.fromisoformat(data.get('created_at')) if data.get('created_at') else datetime.now(),
+            updated_at=datetime.fromisoformat(data.get('updated_at')) if data.get('updated_at') else datetime.now()
+        )
+
+
+@dataclass
+class EffectSheetRegion:
+    """Represents a single region override for an effect sheet."""
+    id: int
+    effect_id: int
+    x: int
+    y: int
+    width: int
+    height: int
+    order_index: int = 0
+    created_at: datetime = field(default_factory=datetime.now)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EffectSheetRegion':
+        return cls(
+            id=data['id'],
+            effect_id=data['effect_id'],
+            x=int(data['x']),
+            y=int(data['y']),
+            width=int(data['width']),
+            height=int(data['height']),
+            order_index=int(data.get('order_index', 0)),
+            created_at=datetime.fromisoformat(data.get('created_at')) if data.get('created_at') else datetime.now()
+        )

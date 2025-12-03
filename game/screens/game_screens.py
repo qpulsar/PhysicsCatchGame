@@ -95,6 +95,7 @@ class Database:
 
         Returns keys only if available in schema and non-null: 
         - effect_correct_sheet, effect_wrong_sheet, effect_fps, effect_scale_percent
+        - effect_correct_sheet_id, effect_wrong_sheet_id
         """
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -103,7 +104,16 @@ class Database:
                 # Check columns existence via PRAGMA to avoid SQL errors on older DBs
                 cursor.execute('PRAGMA table_info(levels)')
                 cols = {row[1] for row in cursor.fetchall()}
-                wanted = ['effect_correct_sheet','effect_wrong_sheet','effect_fps','effect_scale_percent']
+                wanted = [
+                    'effect_correct_sheet',
+                    'effect_wrong_sheet',
+                    'effect_fps',
+                    'effect_scale_percent',
+                    'effect_correct_sheet_id',
+                    'effect_wrong_sheet_id',
+                    'effect_correct_id',
+                    'effect_wrong_id'
+                ]
                 if not any(k in cols for k in wanted):
                     return {}
                 select_cols = ', '.join([k for k in wanted if k in cols])
@@ -119,6 +129,32 @@ class Database:
         except sqlite3.Error as e:
             print(f"Database error get_level_effect_settings: {e}")
             return {}
+
+    def get_effect_sheet_by_id(self, effect_id: int) -> dict | None:
+        """Fetch a single effect_sheets row as dict."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM effect_sheets WHERE id = ?', (effect_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except sqlite3.Error as e:
+            print(f"Database error get_effect_sheet_by_id: {e}")
+            return None
+
+    def get_effect_by_id(self, effect_id: int) -> dict | None:
+        """Fetch a single effect row from 'effects' table as dict."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('SELECT * FROM effects WHERE id = ?', (effect_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except sqlite3.Error as e:
+            print(f"Database error get_effect_by_id: {e}")
+            return None
 
     def get_game_settings(self, game_id: int) -> dict:
         """Get settings key/value for a specific game."""

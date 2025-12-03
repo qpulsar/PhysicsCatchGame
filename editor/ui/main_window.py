@@ -110,13 +110,14 @@ class GamesListFrame(ttk.Frame):
 
 class DashboardFrame(ttk.Frame):
     """The main dashboard frame, showing game details and management tabs."""
-    def __init__(self, parent, game_service: GameService, level_service: LevelService, expression_service: ExpressionService, sprite_service: SpriteService, screen_service: ScreenService):
+    def __init__(self, parent, game_service: GameService, level_service: LevelService, expression_service: ExpressionService, sprite_service: SpriteService, screen_service: ScreenService, effect_service: EffectService = None):
         super().__init__(parent)
         self.game_service = game_service
         self.level_service = level_service
         self.expression_service = expression_service
         self.sprite_service = sprite_service
         self.screen_service = screen_service
+        self.effect_service = effect_service
         self.current_game: Optional[Game] = None
         # Proje kökü (assets için mutlak yol çözmekte kullanılır)
         self._project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
@@ -255,7 +256,7 @@ class DashboardFrame(ttk.Frame):
 
             # Screens tab
             try:
-                self.tabs['screens'] = ScreensTab(self.notebook, self.game_service, self.level_service, self.screen_service, self.sprite_service)
+                self.tabs['screens'] = ScreensTab(self.notebook, self.game_service, self.level_service, self.screen_service, self.sprite_service, self.effect_service)
                 self.notebook.add(self.tabs['screens'].frame, text="Ekranlar")
             except Exception as e:
                 messagebox.showerror("Sekme Hatası", f"Ekranlar sekmesi yüklenemedi: {e}")
@@ -270,166 +271,236 @@ class DashboardFrame(ttk.Frame):
                     tab.refresh()
 
     def _refresh_media_gallery(self):
-        """Özet sekmesindeki medya galerisini yalnızca bu oyunda kullanılan
-        medya ile doldurur.
-
-        - Oyun ayarlarında geçen yollar (başlangıç/bitış arkaplanları, seviye
-          arkaplanları, müzik vb.) gösterilir.
-        - Sprite görselleri, yalnızca bu oyundaki seviyelerdeki ifadeler için
-          tanımlanmış sprite tanımlarının bağlı olduğu sprite sheet'lerden
-          gösterilir.
-        - Global metadata.json açıklamalı medyalar artık eklenmez (yalnızca
-          bu oyuna ait kullanım hedeflenir).
+        """Özet sekmesindeki medya galerisini kategorize ederek yeniler.
+        
+        Kategoriler:
+        - Giriş (Intro): Opening screen ve start background
+        - Zafer (Win): Victory screen ve win background
+        - Yenilgi (Lose): Defeat screen ve lose background
+        - Bilgi (Info): Diğer tanımlı ekranlar
+        - Seviyeler (Levels): Seviye arkaplanları
         """
+        # Temizle
         for child in self.gallery_inner.winfo_children():
             child.destroy()
         self._gallery_images.clear()
+        
         if not self.current_game:
             return
+
         game_id = self.current_game.id
         settings = self.game_service.get_settings(game_id)
-        items = []
-        seen_paths = set()
-        label_map = {
-            'start_background_path': 'Başlangıç Arkaplanı',
-            'thumbnail_path': 'Küçük Resim',
-            'music_path': 'Müzik (BGM)',
-            'end_win_background_path': 'Kazanma Arkaplanı',
-            'end_lose_background_path': 'Kaybetme Arkaplanı'
+        
+        # -- Kategorileri Hazırla --
+        categories = {
+            'intro': {'title': 'Giriş Ekranları (Intro)', 'items': []},
+            'win': {'title': 'Zafer Ekranları (Win)', 'items': []},
+            'lose': {'title': 'Yenilgi Ekranları (Lose)', 'items': []},
+            'info': {'title': 'Bilgi Ekranları', 'items': []},
+            'levels': {'title': 'Seviye Ekranları', 'items': []},
+            'other': {'title': 'Diğer / Genel', 'items': []}
         }
-        for key, label in label_map.items():
-            path = settings.get(key)
-            if path:
-                if path not in seen_paths:
-                    items.append({'type': 'setting', 'key': key, 'label': label, 'path': path})
-                    seen_paths.add(path)
-        for k, v in settings.settings.items():
-            if k.startswith('level_') and k.endswith('_background_path') and v:
-                if v not in seen_paths:
-                    items.append({'type': 'setting', 'key': k, 'label': k.replace('_', ' ').title(), 'path': v})
-                    seen_paths.add(v)
-        # Açılış ekranı (opening) tasarımından referans verilen medya
-        try:
-            sc = self.screen_service.get_screen(game_id, "opening")
-            if sc and getattr(sc, 'data_json', None):
-                import json as _json
-                data = _json.loads(sc.data_json)
-                # background image
-                bg_rel = ((data.get('background') or {}).get('image')) or ''
-                if bg_rel:
-                    if bg_rel not in seen_paths:
-                        items.append({'type': 'screen', 'key': 'opening_bg', 'label': 'Açılış: Arkaplan', 'path': bg_rel})
-                        seen_paths.add(bg_rel)
-                # music
-                mus_rel = data.get('music') or ''
-                if mus_rel and mus_rel not in seen_paths:
-                    items.append({'type': 'screen', 'key': 'opening_music', 'label': 'Açılış: Müzik', 'path': mus_rel})
-                    seen_paths.add(mus_rel)
-                # widget sprite image'ları
-                for w in (data.get('widgets') or []):
-                    sp = (w.get('sprite') or {}) if isinstance(w, dict) else {}
-                    img_rel = sp.get('image')
-                    if img_rel and img_rel not in seen_paths:
-                        items.append({'type': 'screen', 'key': 'opening_widget_sprite', 'label': 'Açılış: Sprite Görseli', 'path': img_rel})
-                        seen_paths.add(img_rel)
-        except Exception:
-            pass
-        # Diğer tüm ekranlardan referans verilen medyaları ekle (victory, defeat, level_*, vb.)
+        
+        seen_paths = set()
+
+        def add_item(cat_key, item_type, key, label, path, context=None):
+            """Helper to add unique items to categories."""
+            if not path or path in seen_paths:
+                return
+            categories[cat_key]['items'].append({
+                'type': item_type,
+                'key': key,
+                'label': label,
+                'path': path,
+                'context': context
+            })
+            seen_paths.add(path)
+
+        # 1. Settings'den gelen temel yollar
+        # Intro
+        add_item('intro', 'setting', 'start_background_path', 'Başlangıç Arkaplanı (Eski)', settings.get('start_background_path'))
+        add_item('intro', 'setting', 'thumbnail_path', 'Küçük Resim', settings.get('thumbnail_path'))
+        
+        # Win/Lose
+        add_item('win', 'setting', 'end_win_background_path', 'Kazanma Arkaplanı (Eski)', settings.get('end_win_background_path'))
+        add_item('lose', 'setting', 'end_lose_background_path', 'Kaybetme Arkaplanı (Eski)', settings.get('end_lose_background_path'))
+        
+        # Genel Müzik -> Other
+        add_item('other', 'setting', 'music_path', 'Genel Müzik (BGM)', settings.get('music_path'))
+
+        # 2. Screen Service'den gelen ekranlar
         try:
             screens = self.screen_service.list_screens(game_id)
+            import json as _json
+            
             for sc in screens:
+                if not getattr(sc, 'data_json', None):
+                    continue
+                
                 try:
-                    if not getattr(sc, 'data_json', None):
-                        continue
-                    data = json.loads(sc.data_json)
-                    name = getattr(sc, 'name', '') or (data.get('id') or '')
-                    prefix = {
-                        'opening': 'Açılış',
-                        'victory': 'Zafer',
-                        'defeat': 'Yenilgi'
-                    }.get(name, f"Ekran: {name}")
-                    # background
-                    bg_rel = ((data.get('background') or {}).get('image')) or ''
-                    if bg_rel and bg_rel not in seen_paths:
-                        items.append({'type': 'screen', 'key': f'{name}_bg', 'label': f'{prefix}: Arkaplan', 'path': bg_rel})
-                        seen_paths.add(bg_rel)
-                    # music
-                    mus_rel = data.get('music') or ''
-                    if mus_rel and mus_rel not in seen_paths:
-                        items.append({'type': 'screen', 'key': f'{name}_music', 'label': f'{prefix}: Müzik', 'path': mus_rel})
-                        seen_paths.add(mus_rel)
-                    # widget sprite image'ları
-                    for w in (data.get('widgets') or []):
-                        if not isinstance(w, dict):
-                            continue
-                        sp = (w.get('sprite') or {})
-                        img_rel = sp.get('image')
-                        if img_rel and img_rel not in seen_paths:
-                            items.append({'type': 'screen', 'key': f'{name}_widget_sprite', 'label': f'{prefix}: Sprite Görseli', 'path': img_rel})
-                            seen_paths.add(img_rel)
+                    data = _json.loads(sc.data_json)
                 except Exception:
                     continue
-        except Exception:
-            pass
-        # Yalnızca bu oyunda kullanılan sprite sheet'leri topla
+
+                s_name = getattr(sc, 'name', '') or str(data.get('id', ''))
+                
+                # Kategori Belirle
+                target_cat = 'info' # Varsayılan
+                if s_name == 'opening':
+                    target_cat = 'intro'
+                elif s_name == 'victory':
+                    target_cat = 'win'
+                elif s_name == 'defeat':
+                    target_cat = 'lose'
+                
+                prefix = s_name.title()
+                
+                # Background
+                bg_rel = ((data.get('background') or {}).get('image')) or ''
+                if bg_rel:
+                    add_item(target_cat, 'screen', f'{s_name}_bg', f'{prefix}: Arkaplan', bg_rel)
+                
+                # Music
+                mus_rel = data.get('music') or ''
+                if mus_rel:
+                    add_item(target_cat, 'screen', f'{s_name}_music', f'{prefix}: Müzik', mus_rel)
+                
+                # Widget Sprites
+                widgets = data.get('widgets') or []
+                for idx, w in enumerate(widgets):
+                    if not isinstance(w, dict): continue
+                    sp = w.get('sprite') or {}
+                    img_rel = sp.get('image')
+                    if img_rel:
+                        add_item(target_cat, 'screen', f'{s_name}_w{idx}', f'{prefix}: Widget', img_rel)
+
+        except Exception as e:
+            print(f"Error loading screens for gallery: {e}")
+
+        # 3. Level Arkaplanları
         try:
-            # Oyunun seviyelerini ve ifadelerini gezerek kullanılan sprite tanımlarını bul
+            levels = self.level_service.get_levels(game_id)
+            # Level numarasına göre sırala
+            levels.sort(key=lambda x: x.level_number)
+            
+            for lvl in levels:
+                # Level arkaplanları genellikle GameSettings içinde tutuluyor
+                s_key = f"level_{lvl.id}_background_path"
+                s_path = settings.get(s_key)
+                
+                if s_path:
+                    label_text = f"Level {lvl.level_number}"
+                    if lvl.level_name:
+                        label_text += f": {lvl.level_name}"
+                    else:
+                        label_text += ": Arkaplan"
+                        
+                    add_item('levels', 'setting', s_key, label_text, s_path)
+
+        except Exception as e:
+            print(f"Error loading levels for gallery: {e}")
+
+        # 4. Sprite Sheets (Kullanılanlar) -> 'other' veya ilgili kategoriye?
+        # Genellikle sprite'lar geneldir ama burada 'other' altına koyalım.
+        try:
             levels = self.level_service.get_levels(game_id)
             used_sprite_ids = set()
             for lvl in levels:
                 try:
                     exprs = self.expression_service.get_expressions(lvl.id)
-                except Exception:
+                except:
                     exprs = []
                 for expr in exprs:
                     try:
                         sdef = self.sprite_service.get_sprite_definition_for_expr(expr.id)
-                    except Exception:
-                        sdef = None
-                    if sdef and getattr(sdef, 'sprite_id', None):
-                        used_sprite_ids.add(sdef.sprite_id)
+                        if sdef and getattr(sdef, 'sprite_id', None):
+                            used_sprite_ids.add(sdef.sprite_id)
+                    except: pass
+            
             for sid in used_sprite_ids:
                 try:
                     s = self.sprite_service.get_sprite_sheet(sid)
-                except Exception:
-                    s = None
-                if s and s.path not in seen_paths:
-                    items.append({'type': 'sprite', 'sprite_id': s.id, 'label': f"Sprite: {s.name}", 'path': s.path})
-                    seen_paths.add(s.path)
+                    if s:
+                        add_item('other', 'sprite', f'sprite_{s.id}', f"Sprite: {s.name}", s.path)
+                except: pass
         except Exception:
-            # Sprite taraması başarısız olsa bile, galeri en azından ayarlardaki medyaları gösterebilsin
             pass
-        cols = 3
-        row = 0
-        col = 0
-        thumb_size = (160, 100)
-        for it in items:
-            frame = ttk.LabelFrame(self.gallery_inner, padding=5, text="")
-            frame.grid(row=row, column=col, sticky="nw", padx=5, pady=5)
+
+        # -- ARAYÜZ OLUŞTURMA --
+        
+        # Kategorileri belirli bir sırada dönelim
+        display_order = ['intro', 'win', 'lose', 'info', 'levels', 'other']
+        
+        current_row = 0
+        thumb_size = (120, 80) # Biraz daha kompakt
+
+        for cat_key in display_order:
+            cat_data = categories[cat_key]
+            items = cat_data['items']
             
-            path = it.get('path')
-            abs_path = self._abs_path(path) if path else None
-            thumb_label = ttk.Label(frame)
-            thumb_label.pack(pady=(0, 2))
-            img_ref = None
-            if abs_path and os.path.isfile(abs_path) and self._is_image(abs_path):
-                try:
-                    img = Image.open(abs_path)
-                    img.thumbnail(thumb_size, Image.LANCZOS)
-                    img_ref = ImageTk.PhotoImage(img)
-                    thumb_label.configure(image=img_ref)
-                    self._gallery_images.append(img_ref)
-                except Exception:
-                    thumb_label.configure(text="[Resim yüklenemedi]")
-            else:
-                name = os.path.basename(path) if path else "(yok)"
-                thumb_label.configure(text=f"📄 {name}")
-            ttk.Label(frame, text=it.get('label', '')).pack()
-            ttk.Button(frame, text="Sil", command=lambda item=it: self._delete_media_item(item)).pack(pady=(4,0))
-            col += 1
-            if col >= cols:
-                col = 0
-                row += 1
+            if not items:
+                continue
+
+            # Kategori Başlığı (LabelFrame)
+            group_frame = ttk.LabelFrame(self.gallery_inner, text=cat_data['title'], padding=10)
+            group_frame.grid(row=current_row, column=0, sticky="ew", padx=5, pady=10)
+            self.gallery_inner.columnconfigure(0, weight=1)
+            
+            # Grid yapısı için iç frame
+            # items_frame = ttk.Frame(group_frame)
+            # items_frame.pack(fill=tk.BOTH, expand=True)
+            
+            col = 0
+            row = 0
+            max_cols = 4 # Yan yana kaç tane
+            
+            for item in items:
+                # Her bir item için bir frame
+                item_frame = ttk.Frame(group_frame, borderwidth=1, relief="solid")
+                item_frame.grid(row=row, column=col, padx=5, pady=5, sticky="n")
+                
+                path = item.get('path')
+                abs_path = self._abs_path(path)
+                
+                # Görsel veya Dosya İkonu
+                preview_lbl = ttk.Label(item_frame)
+                preview_lbl.pack(pady=2, padx=2)
+                
+                img_ref = None
+                if abs_path and os.path.isfile(abs_path) and self._is_image(abs_path):
+                    try:
+                        img = Image.open(abs_path)
+                        img.thumbnail(thumb_size, Image.LANCZOS)
+                        img_ref = ImageTk.PhotoImage(img)
+                        preview_lbl.configure(image=img_ref)
+                        self._gallery_images.append(img_ref) # Referansı sakla
+                    except Exception:
+                        preview_lbl.configure(text="[Hata]")
+                else:
+                    # Resim değilse veya bulunamadıysa
+                    fname = os.path.basename(path) if path else "???"
+                    if path and not (abs_path and os.path.isfile(abs_path)):
+                         preview_lbl.configure(text=f"❌ {fname}\n(Dosya Yok)", foreground="red")
+                    else:
+                        preview_lbl.configure(text=f"🎵/📄 {fname}")
+
+                # Etiket (Alt metin)
+                lbl_text = item.get('label', '')
+                if len(lbl_text) > 20:
+                    lbl_text = lbl_text[:17] + "..."
+                ttk.Label(item_frame, text=lbl_text, font=("Segoe UI", 8)).pack(pady=(0, 2))
+
+                # Silme butonu (Opsiyonel - çok kalabalık olmasın diye belki küçük bir 'x' butonu?)
+                # Mevcut yapıda 'Sil' butonu vardı, koruyalım ama küçük olsun.
+                del_btn = ttk.Button(item_frame, text="Sil", width=4, command=lambda it=item: self._delete_media_item(it))
+                del_btn.pack(pady=(0, 2))
+
+                col += 1
+                if col >= max_cols:
+                    col = 0
+                    row += 1
+            
+            current_row += 1
 
     def _is_image(self, path: str) -> bool:
         ext = os.path.splitext(path.lower())[1]
@@ -541,7 +612,8 @@ class MainWindow:
             self.level_service,
             self.expression_service,
             self.sprite_service,
-            self.screen_service
+            self.screen_service,
+            self.effect_service
         )
         paned_window.add(self.dashboard_frame, weight=4)
         
@@ -703,11 +775,9 @@ class MainWindow:
 
         Note: Saving to DB is pending schema approval; the window allows selection and preview.
         """
-        if not self.current_game_id:
-            messagebox.showwarning("Uyarı", "Efektleri düzenlemek için önce bir oyun seçmelisiniz.")
-            return
+        # Oyun seçme zorunluluğu kaldırıldı, efektler global yönetilir.
         try:
-            EffectsManagerWindow(self.root, self.effect_service, game_id=self.current_game_id)
+            EffectsManagerWindow(self.root, self.effect_service, game_id=0)
         except Exception as e:
             messagebox.showerror("Effect", f"Pencere açılamadı: {e}")
 

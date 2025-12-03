@@ -164,6 +164,52 @@ class EffectManager:
                 cx, cy = int(self.x), int(self.y)
             rect = frame.get_rect(center=(int(cx), int(cy)))
             surface.blit(frame, rect)
+
+    class _FrameAnimState:
+        """Internal runtime for a frame-sequence animation (arbitrary frames on a sheet)."""
+        def __init__(self, sheet: pygame.Surface, frames: List[Dict[str, int]], x: float, y: float, frame_ms: int = 120, scale: float = 1.0, *, follow_rect: Optional[pygame.Rect] = None, offset: Tuple[int, int] | None = None):
+            self.sheet = sheet
+            self.frames = frames
+            self.x = x
+            self.y = y
+            self.scale = max(0.1, scale)
+            self.frame_duration = max(10, frame_ms)
+            self.total_frames = len(frames)
+            self.current = 0
+            self.last_tick = pygame.time.get_ticks()
+            self.follow_rect = follow_rect
+            self.offset = offset if offset is not None else (0, 0)
+
+        def update(self) -> bool:
+            now = pygame.time.get_ticks()
+            if now - self.last_tick >= self.frame_duration:
+                self.current += 1
+                self.last_tick = now
+            return self.current < self.total_frames
+
+        def draw(self, surface: pygame.Surface) -> None:
+            if self.current >= self.total_frames:
+                return
+            fr = self.frames[self.current]
+            src = pygame.Rect(fr['x'], fr['y'], fr['w'], fr['h'])
+            # Clip to sheet bounds to avoid crashes
+            src.width = min(src.width, self.sheet.get_width() - src.x)
+            src.height = min(src.height, self.sheet.get_height() - src.y)
+            if src.width <= 0 or src.height <= 0:
+                return
+                
+            frame = self.sheet.subsurface(src)
+            if self.scale != 1.0:
+                w = max(1, int(src.width * self.scale))
+                h = max(1, int(src.height * self.scale))
+                frame = pygame.transform.smoothscale(frame, (w, h))
+            
+            if self.follow_rect is not None:
+                cx, cy = self.follow_rect.centerx + int(self.offset[0]), self.follow_rect.centery + int(self.offset[1])
+            else:
+                cx, cy = int(self.x), int(self.y)
+            rect = frame.get_rect(center=(int(cx), int(cy)))
+            surface.blit(frame, rect)
     
     def trigger_confetti(self, x: float, y: float, count: int = 40) -> None:
         """Trigger a confetti effect at the specified position.
@@ -287,6 +333,63 @@ class EffectManager:
             return True
         except Exception:
             return False
+
+    def trigger_effect_by_data(self, effect_data: Dict, x: float, y: float, scale: float = 1.0, follow_rect: Optional[pygame.Rect] = None, offset: Tuple[int, int] | None = None) -> bool:
+        """Trigger an effect based on DB configuration data (params_json)."""
+        if not effect_data:
+            return False
+        
+        try:
+            etype = effect_data.get('type')
+            if etype == 'frame_sequence':
+                path = effect_data.get('image_path')
+                if not path:
+                    return False
+                    
+                # Normalize path separators
+                path = path.replace('\\', '/')
+                
+                # Resolve full path
+                # Game is running from root, database paths usually start with 'assets/'
+                if not os.path.exists(path):
+                    # Try prepending assets/ if missing and path is just a filename or partial path
+                    if not path.startswith('assets') and os.path.exists(os.path.join('assets', path)):
+                        path = os.path.join('assets', path)
+                    elif not os.path.exists(path):
+                         print(f"[EffectManager] Error: Effect image not found at '{path}'")
+                         return False
+
+                sheet = self._sheet_cache.get(path)
+                if sheet is None:
+                    try:
+                        img = pygame.image.load(path).convert_alpha()
+                        self._sheet_cache[path] = img
+                        sheet = img
+                    except Exception as e:
+                        print(f"[EffectManager] Error loading image '{path}': {e}")
+                        return False
+                
+                frames = effect_data.get('frames', [])
+                frame_ms = int(effect_data.get('frame_ms', 120))
+                
+                if not frames:
+                    return False
+                    
+                anim = self._FrameAnimState(
+                    sheet, frames, x, y, 
+                    frame_ms=frame_ms, 
+                    scale=scale, 
+                    follow_rect=follow_rect, 
+                    offset=offset
+                )
+                self._active_sheet_anims.append(anim) # Using the same list for update loop
+                return True
+                
+            return False
+        except Exception as e:
+            print(f"[EffectManager] Trigger error: {e}")
+            return False
+            
     # --- Sprite sheet internals ---
     def _update_sheet_anims(self) -> None:
         alive: List[EffectManager._SheetAnimState] = []

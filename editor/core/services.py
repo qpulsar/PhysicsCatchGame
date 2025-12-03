@@ -5,7 +5,18 @@ import os
 import shutil
 import unicodedata
 
-from .models import Game, Level, Expression, GameSettings, Sprite, SpriteDefinition, Screen, Effect
+from .models import (
+    Game,
+    Level,
+    Expression,
+    GameSettings,
+    Sprite,
+    SpriteDefinition,
+    Screen,
+    Effect,
+    EffectSheet,
+    EffectSheetRegion,
+)
 from ..database.database import DatabaseManager
 
 
@@ -145,24 +156,169 @@ class EffectService:
         self.db = db_manager
 
     def add_effect(self, game_id: int, name: str, type_: str, params_json: str) -> Effect:
-        """Create a new effect configuration."""
-        eid = self.db.add_effect(game_id, name, type_, params_json)
-        row = self.db.get_effect(game_id, name)
+        """Create a new effect configuration.
+        
+        game_id is kept for API compatibility but stored as 0 (global) via DB manager logic if needed.
+        """
+        eid = self.db.add_effect(name, type_, params_json, game_id)
+        row = self.db.get_effect(name, game_id)
         return Effect.from_dict(dict(row)) if row else Effect(id=eid, game_id=game_id, name=name, type=type_, params_json=params_json)
 
-    def get_effects(self, game_id: int) -> List[Effect]:
-        """List all effects for a game."""
+    def get_effects(self, game_id: int = 0) -> List[Effect]:
+        """List all effects (Globally)."""
         rows = self.db.get_effects(game_id)
         return [Effect.from_dict(dict(r)) for r in rows]
 
     def get_effect(self, game_id: int, name: str) -> Optional[Effect]:
-        """Get a single effect by name."""
-        row = self.db.get_effect(game_id, name)
+        """Get a single effect by name (Globally)."""
+        row = self.db.get_effect(name, game_id)
         return Effect.from_dict(dict(row)) if row else None
 
+    def update_effect(self, effect_id: int, game_id: int, name: str, type_: str, params_json: str) -> bool:
+        """Update an existing effect (Globally)."""
+        return self.db.update_effect(effect_id, name, type_, params_json, game_id)
+
     def delete_effect(self, game_id: int, name: str) -> bool:
-        """Delete an effect configuration."""
-        return self.db.delete_effect(game_id, name)
+        """Delete an effect configuration (Globally)."""
+        return self.db.delete_effect(name, game_id)
+
+
+class EffectSheetService:
+    """Service for managing structured sprite-sheet based effects."""
+
+    def __init__(self, db_manager: DatabaseManager):
+        self.db = db_manager
+
+    def list_effect_sheets(self, game_id: int) -> List[EffectSheet]:
+        """Return all effect sheets for given game."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT * FROM effect_sheets WHERE game_id = ? ORDER BY name',
+                (game_id,)
+            )
+            return [EffectSheet.from_dict(dict(row)) for row in cursor.fetchall()]
+
+    def get_effect_sheet(self, effect_id: int) -> Optional[EffectSheet]:
+        """Return single effect sheet by id."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM effect_sheets WHERE id = ?', (effect_id,))
+            row = cursor.fetchone()
+            return EffectSheet.from_dict(dict(row)) if row else None
+
+    def upsert_effect_sheet(self, sheet: Dict[str, Any]) -> EffectSheet:
+        """Create or update an effect sheet from provided dict."""
+        payload = (
+            sheet['game_id'],
+            sheet['name'],
+            sheet['sheet_path'],
+            int(sheet['cols']),
+            int(sheet['rows']),
+            float(sheet['scale']),
+            int(sheet['fps'])
+        )
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            if sheet.get('id'):
+                cursor.execute(
+                    '''UPDATE effect_sheets
+                       SET name = ?, sheet_path = ?, cols = ?, rows = ?, scale = ?, fps = ?,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND game_id = ?''',
+                    (
+                        sheet['name'],
+                        sheet['sheet_path'],
+                        int(sheet['cols']),
+                        int(sheet['rows']),
+                        float(sheet['scale']),
+                        int(sheet['fps']),
+                        int(sheet['id']),
+                        sheet['game_id'],
+                    )
+                )
+                target_id = sheet['id']
+            else:
+                cursor.execute(
+                    '''INSERT INTO effect_sheets
+                       (game_id, name, sheet_path, cols, rows, scale, fps)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    payload
+                )
+                target_id = cursor.lastrowid
+            conn.commit()
+        return self.get_effect_sheet(int(target_id))
+
+    def delete_effect_sheet(self, effect_id: int) -> bool:
+        """Delete effect sheet and cascading regions."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM effect_sheets WHERE id = ?', (effect_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_regions(self, effect_id: int) -> List[EffectSheetRegion]:
+        """List regions belonging to an effect sheet ordered by index."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT * FROM effect_sheet_regions WHERE effect_id = ? ORDER BY order_index, id',
+                (effect_id,)
+            )
+            return [EffectSheetRegion.from_dict(dict(row)) for row in cursor.fetchall()]
+
+    def upsert_region(self, region: Dict[str, Any]) -> EffectSheetRegion:
+        """Create or update a region entry."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            if region.get('id'):
+                cursor.execute(
+                    '''UPDATE effect_sheet_regions
+                       SET x = ?, y = ?, width = ?, height = ?, order_index = ?, updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND effect_id = ?''',
+                    (
+                        int(region['x']),
+                        int(region['y']),
+                        int(region['width']),
+                        int(region['height']),
+                        int(region.get('order_index', 0)),
+                        int(region['id']),
+                        int(region['effect_id'])
+                    )
+                )
+                target_id = region['id']
+            else:
+                cursor.execute(
+                    '''INSERT INTO effect_sheet_regions
+                       (effect_id, x, y, width, height, order_index)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (
+                        int(region['effect_id']),
+                        int(region['x']),
+                        int(region['y']),
+                        int(region['width']),
+                        int(region['height']),
+                        int(region.get('order_index', 0))
+                    )
+                )
+                target_id = cursor.lastrowid
+            conn.commit()
+        return self._get_region_by_id(int(target_id))
+
+    def delete_region(self, region_id: int) -> bool:
+        """Delete a single region row."""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM effect_sheet_regions WHERE id = ?', (region_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def _get_region_by_id(self, region_id: int) -> Optional[EffectSheetRegion]:
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM effect_sheet_regions WHERE id = ?', (region_id,))
+            row = cursor.fetchone()
+            return EffectSheetRegion.from_dict(dict(row)) if row else None
 
 
 class LevelService:

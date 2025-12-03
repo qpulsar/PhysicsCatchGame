@@ -24,7 +24,7 @@ class ScreensTab:
         frame: Sekmenin kök çerçevesi.
     """
 
-    def __init__(self, parent, game_service, level_service, screen_service, sprite_service):
+    def __init__(self, parent, game_service, level_service, screen_service, sprite_service, effect_service=None):
         """Sekmeyi başlatır ve layout'u kurar.
 
         Args:
@@ -33,12 +33,14 @@ class ScreensTab:
             level_service: Seviye servisi
             screen_service: Ekran servisi
             sprite_service: Sprite servisi
+            effect_service: Efekt servisi
         """
         self.parent = parent
         self.game_service = game_service
         self.level_service = level_service
         self.screen_service = screen_service
         self.sprite_service = sprite_service
+        self.effect_service = effect_service
 
         self.frame = ttk.Frame(parent, padding=10)
         self.frame.columnconfigure(0, weight=1)
@@ -126,7 +128,12 @@ class ScreensTab:
         try:
             root = self.frame.winfo_toplevel()
             game_id: Optional[int] = getattr(root, "current_game_id", None)
-            effect_service = getattr(root, "effect_service", None)
+            
+            # Servisi öncelikle doğrudan al, yoksa root'tan dene (fallback)
+            eff_svc = self.effect_service
+            if not eff_svc:
+                eff_svc = getattr(root, "effect_service", None)
+                
             if not game_id:
                 messagebox.showwarning("Ekranlar", "Lütfen önce bir oyun seçin.")
                 return
@@ -137,7 +144,7 @@ class ScreensTab:
                 self.sprite_service,
                 self.game_service,
                 self.level_service,
-                effect_service=effect_service,
+                effect_service=eff_svc,
                 screen_name=screen_name,
                 screen_type=screen_type,
             )
