@@ -16,6 +16,7 @@ from .tabs.settings_tab import SettingsTab
 from .tabs.sprites_tab import SpritesTab
 from .tabs.media_tab import MediaTab
 from .tabs.screens_tab import ScreensTab
+from .tabs.arduino_tab import ArduinoTab
 from .game_dialog import GameDialog
 from .screen_designer import ScreenDesignerWindow
 from .media_manager import MediaManagerWindow
@@ -260,6 +261,13 @@ class DashboardFrame(ttk.Frame):
                 self.notebook.add(self.tabs['screens'].frame, text="Ekranlar")
             except Exception as e:
                 messagebox.showerror("Sekme Hatası", f"Ekranlar sekmesi yüklenemedi: {e}")
+
+            # Arduino tab
+            try:
+                self.tabs['arduino'] = ArduinoTab(self.notebook, self.game_service)
+                self.notebook.add(self.tabs['arduino'].frame, text="Arduino")
+            except Exception as e:
+                messagebox.showerror("Sekme Hatası", f"Arduino sekmesi yüklenemedi: {e}")
             
             self.refresh_tabs()
 

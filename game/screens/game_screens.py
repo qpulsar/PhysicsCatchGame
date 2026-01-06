@@ -67,7 +67,12 @@ class MeshBackground:
 
 class Database:
     """A simple class to fetch game data for the main game."""
-    def __init__(self, db_path='game_data.db'):
+    def __init__(self, db_path=None):
+        if db_path is None:
+            # Bundled veya normal çalışmada veritabanını bul
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            db_path = os.path.join(base_dir, 'game_data.db')
+        
         self.db_path = db_path
 
     def get_games(self) -> list: # Hinting for Game object would require importing it

@@ -23,7 +23,10 @@ class Game:
     def __init__(self, screen, force_game_id: int | None = None, start_state: str | None = None):
         self.screen = screen
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.Font(None, 48)
+        try:
+            self.font = pygame.font.SysFont(['Verdana', 'Arial', 'sans-serif'], 48)
+        except:
+            self.font = pygame.font.Font(None, 48)
         self.game_state = GameState()
         self.effect_manager = EffectManager()
         self.level_manager = LevelManager()
@@ -337,7 +340,11 @@ class Game:
         - '\n' satÄ±r sonlarÄ±nÄ± korur.
         - wrap_width verilirse kelime bazlÄ± sarma uygular.
         """
-        font = pygame.font.Font(None, max(12, int(font_size)))
+        try:
+            font = pygame.font.SysFont(['Verdana', 'Arial', 'sans-serif'], max(12, int(font_size)))
+        except:
+            font = pygame.font.Font(None, max(12, int(font_size)))
+            
         lines: list[str] = []
         raw_lines = str(text or "").split("\n")
         for raw in raw_lines:
@@ -345,16 +352,19 @@ class Game:
                 words = raw.split(' ')
                 current = ""
                 for w in words:
-                    test = (current + w + " ").strip()
+                    if not w: continue
+                    test = (current + " " + w).strip()
                     if font.size(test)[0] <= wrap_width:
                         current = test
                     else:
                         if current:
                             lines.append(current)
                         current = w
-                lines.append(current)
+                if current:
+                    lines.append(current)
             else:
                 lines.append(raw)
+        
         line_h = font.get_linesize()
         cy = y
         for ln in lines:
