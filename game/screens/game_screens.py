@@ -1,7 +1,7 @@
 import pygame
 import json
 from settings import *
-from ..core.utils import draw_text
+from ..core.utils import draw_text, get_resource_path
 import random
 import math
 import sqlite3
@@ -70,8 +70,7 @@ class Database:
     def __init__(self, db_path=None):
         if db_path is None:
             # Bundled veya normal çalışmada veritabanını bul
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-            db_path = os.path.join(base_dir, 'game_data.db')
+            db_path = get_resource_path('game_data.db')
         
         self.db_path = db_path
 
@@ -313,7 +312,11 @@ class Carousel:
                 assets_thumb = settings.get('thumbnail_path')
             except Exception:
                 assets_thumb = None
-            thumbnail_path = assets_thumb if assets_thumb and os.path.exists(assets_thumb) else f"img/thumbnails/{game.id}.png"
+            thumbnail_path = assets_thumb if assets_thumb and os.path.exists(assets_thumb) else get_resource_path(f"assets/images/{game.id}.png")
+            # Fallback to checking assets/games/ID/thumbnail.png or similar if needed, but per-game asset is usually handled by settings.
+            # If standard location is desired:
+            if not os.path.exists(thumbnail_path):
+                 thumbnail_path = get_resource_path(f"img/thumbnails/{game.id}.png")
             card_surface = pygame.Surface((self.card_w, self.card_h), pygame.SRCALPHA)
 
             # Canlı arka planı her zaman çiz

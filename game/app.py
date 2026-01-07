@@ -18,6 +18,12 @@ from .screens.game_screens import (
     Database,
     Carousel
 )
+from .core.utils import draw_text, get_resource_path
+import random
+import math
+import sqlite3
+import os
+
 
 class Game:
     def __init__(self, screen, force_game_id: int | None = None, start_state: str | None = None):
@@ -126,11 +132,11 @@ class Game:
         candidates = []
         # 1) legacy backgrounds
         for i in range(2, 6):
-            p = os.path.join('img', 'backgrounds', f'{i}.jpg')
+            p = get_resource_path(os.path.join('img', 'backgrounds', f'{i}.jpg'))
             if os.path.exists(p):
                 candidates.append(p)
         # 2) assets/images altÄ±ndan al
-        assets_img_dir = os.path.join('assets', 'images')
+        assets_img_dir = get_resource_path(os.path.join('assets', 'images'))
         if os.path.isdir(assets_img_dir):
             for fn in sorted(os.listdir(assets_img_dir)):
                 if fn.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
@@ -192,11 +198,10 @@ class Game:
             if not rel:
                 return None
             p = rel.replace('\\', '/').strip()
-            if os.path.isabs(p):
-                return p if os.path.exists(p) else None
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            # Debug yazÄ±larÄ± temizlendi
-            cand = os.path.join(project_root, p)
+            if os.path.isabs(p) and os.path.exists(p):
+                return p
+            
+            cand = get_resource_path(p)
             return cand if os.path.exists(cand) else None
         except Exception:
             return None
@@ -539,7 +544,7 @@ class Game:
             # Ultimate fallback: DB'de bÃ¶lge yoksa, assets/images iÃ§inden direkt gÃ¶rselleri kullan
             if not self.item_base_surfaces:
                 try:
-                    assets_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'assets', 'images')
+                    assets_dir = get_resource_path(os.path.join('assets', 'images'))
                     added = 0
                     if os.path.isdir(assets_dir):
                         for fn in sorted(os.listdir(assets_dir)):
@@ -757,10 +762,11 @@ class Game:
                 # pick first available under assets/audio or assets/midi
                 chosen_music = None
                 for base in ('assets/audio', 'assets/midi'):
-                    if os.path.isdir(base):
-                        for fn in os.listdir(base):
+                    base_path = get_resource_path(base)
+                    if os.path.isdir(base_path):
+                        for fn in os.listdir(base_path):
                             if fn.lower().endswith(('.mp3', '.wav', '.ogg', '.mid', '.midi')):
-                                chosen_music = os.path.join(base, fn)
+                                chosen_music = os.path.join(base_path, fn)
                                 break
                     if chosen_music:
                         break

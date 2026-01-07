@@ -1,8 +1,29 @@
 # utils.py
 import pygame
+import os
+import sys
 from settings import BLACK
 from settings import ALL_QUANTITIES, LEVEL_TARGETS
 import random
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Dev mode: use project root (two levels up from this file: game/core/utils.py -> game/core -> game -> root)
+        # However, checking the folder structure:
+        # game/core/utils.py
+        # App is at root/main.py
+        # We want base_path to be root.
+        # os.path.dirname(__file__) is .../game/core
+        # .. is .../game
+        # .. is .../ (root)
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+    return os.path.join(base_path, relative_path)
+
 
 def draw_text(surf, text, size, x, y, color, wrap_width=None):
     # Sistem fontlarını dene (Verdana, Arial daha okunaklıdır)
