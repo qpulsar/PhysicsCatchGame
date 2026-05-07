@@ -61,28 +61,35 @@ class EffectsManagerWindow(tk.Toplevel):
         self._grid_ys: List[int] = []  # Yatay çizgi Y koordinatları (Image space)
         self._drag_line: Optional[Tuple[str, int]] = None  # ('x', index) veya ('y', index)
         self._hover_line: Optional[Tuple[str, int]] = None
+        
+        # Animation Preview state
+        self._preview_refs: List[ImageTk.PhotoImage] = []
+        self._preview_job: Optional[str] = None
+        self._preview_loop_idx = 0
 
         self._build_ui()
         self._refresh_effects_list()
 
+    # --- DB İşlemleri ---
+
     def _build_ui(self) -> None:
-        """UI iskeletini kurar: Sol (Liste), Orta (Kareler), Sağ (Canvas)."""
+        """UI iskeletini kurar: Sol (Efektler), Orta (Önizleme/Kareler), Sağ (Düzenleyici)."""
         main_frame = ttk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # --- Üst Araç Çubuğu ---
-        toolbar = ttk.Frame(main_frame, padding=4)
+        toolbar = ttk.Frame(main_frame, padding=6)
         toolbar.pack(fill=tk.X, side=tk.TOP)
         
-        ttk.Label(toolbar, text="Efekt Adı:").pack(side=tk.LEFT)
+        ttk.Label(toolbar, text="Efekt Adı:", font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT, padx=(5, 2))
         self.effect_name_var = tk.StringVar(value="New Effect")
-        ttk.Entry(toolbar, textvariable=self.effect_name_var, width=24).pack(side=tk.LEFT, padx=4)
+        ttk.Entry(toolbar, textvariable=self.effect_name_var, width=30).pack(side=tk.LEFT, padx=4)
         
-        ttk.Button(toolbar, text="Yeni Efekt", command=self._new_effect).pack(side=tk.LEFT, padx=10)
-        ttk.Button(toolbar, text="Kaydet / Güncelle", command=self._save_effect).pack(side=tk.LEFT, padx=4)
+        ttk.Button(toolbar, text="+ Yeni Efekt", command=self._new_effect).pack(side=tk.LEFT, padx=10)
+        ttk.Button(toolbar, text="💾 Kaydet", command=self._save_effect).pack(side=tk.LEFT, padx=4)
         
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
-        ttk.Button(toolbar, text="Medya Seç...", command=self._select_media_image).pack(side=tk.LEFT, padx=4)
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=15)
+        ttk.Button(toolbar, text="🖼️ Görsel Seç...", command=self._select_media_image).pack(side=tk.LEFT, padx=4)
 
         # --- Ana Split (PanedWindow) ---
         self.paned = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
@@ -92,90 +99,85 @@ class EffectsManagerWindow(tk.Toplevel):
         left_panel = ttk.LabelFrame(self.paned, text="Kayıtlı Efektler", padding=4)
         self.paned.add(left_panel, weight=1)
 
-        self.effects_tree = ttk.Treeview(left_panel, columns=("name", "type"), show="headings")
-        self.effects_tree.heading("name", text="Ad")
-        self.effects_tree.heading("type", text="Tip")
-        self.effects_tree.column("name", width=120)
-        self.effects_tree.column("type", width=80)
+        self.effects_tree = ttk.Treeview(left_panel, columns=("name", "type"), show="headings", selectmode="browse")
+        self.effects_tree.heading("name", text="Efekt Adı")
+        self.effects_tree.heading("type", text="Tür")
+        self.effects_tree.column("name", width=140)
+        self.effects_tree.column("type", width=70)
         self.effects_tree.pack(fill=tk.BOTH, expand=True)
         self.effects_tree.bind("<<TreeviewSelect>>", self._on_effect_select)
         
         btn_frame_left = ttk.Frame(left_panel)
         btn_frame_left.pack(fill=tk.X, pady=4)
-        ttk.Button(btn_frame_left, text="Seçili Efekti Sil", command=self._delete_effect_db).pack(fill=tk.X)
+        ttk.Button(btn_frame_left, text="🗑️ Seçili Efekti Sil", command=self._delete_effect_db).pack(fill=tk.X)
 
-        # 2. Orta Panel: Kare Listesi ve Önizleme Ayarları
-        mid_panel = ttk.LabelFrame(self.paned, text="Kareler (Frames)", padding=4)
+        # 2. Orta Panel: Önizleme + Kare Listesi
+        mid_panel = ttk.Frame(self.paned)
         self.paned.add(mid_panel, weight=1)
         
-        self.listbox = tk.Listbox(mid_panel, height=20, selectmode=tk.EXTENDED)
-        self.listbox.pack(fill=tk.BOTH, expand=True)
-        self.listbox.bind("<<ListboxSelect>>", lambda e: self._select_from_list())
-        # Ctrl+A veya Command+A ile tümünü seç
-        self.listbox.bind("<Control-a>", self._select_all_frames)
-        self.listbox.bind("<Command-a>", self._select_all_frames) # Mac için
+        # Üst: Animasyon Önizleme
+        anim_group = ttk.LabelFrame(mid_panel, text="Canlı Önizleme", padding=6)
+        anim_group.pack(fill=tk.X, side=tk.TOP, pady=(0, 4))
+        
+        self.preview_canvas = tk.Canvas(anim_group, bg="#1a1a1a", height=180, highlightthickness=0)
+        self.preview_canvas.pack(fill=tk.X, expand=True)
+        
+        play_ctrl = ttk.Frame(anim_group)
+        play_ctrl.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(play_ctrl, text="Kare (ms):").pack(side=tk.LEFT)
+        self.frame_ms_var = tk.StringVar(value="120")
+        ttk.Entry(play_ctrl, textvariable=self.frame_ms_var, width=5).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(play_ctrl, text="▶ Oynat", width=8, command=self._preview_play).pack(side=tk.LEFT, padx=4)
+        ttk.Button(play_ctrl, text="■ Dur", width=8, command=self._preview_stop).pack(side=tk.LEFT)
 
-        mid_btns = ttk.Frame(mid_panel)
+        # Alt: Kare Listesi
+        frames_group = ttk.LabelFrame(mid_panel, text="Kareler (Frames)", padding=4)
+        frames_group.pack(fill=tk.BOTH, expand=True)
+        
+        self.listbox = tk.Listbox(frames_group, height=10, selectmode=tk.EXTENDED, font=("Courier", 9))
+        self.listbox.pack(fill=tk.BOTH, expand=True)
+        self.listbox.bind("<<ListboxSelect>>", self._on_listbox_select)
+        self.listbox.bind("<Control-a>", self._select_all_frames)
+        self.listbox.bind("<Command-a>", self._select_all_frames)
+
+        mid_btns = ttk.Frame(frames_group)
         mid_btns.pack(fill=tk.X, pady=4)
         ttk.Button(mid_btns, text="▲", width=3, command=lambda: self._move_item(-1)).pack(side=tk.LEFT, padx=2)
         ttk.Button(mid_btns, text="▼", width=3, command=lambda: self._move_item(1)).pack(side=tk.LEFT, padx=2)
         ttk.Button(mid_btns, text="Sil", command=self._delete_frame_item).pack(side=tk.RIGHT, padx=2)
 
-        # --- Araçlar Paneli (Auto Slice & Sort) ---
-        tools_frame = ttk.LabelFrame(mid_panel, text="Akıllı Araçlar", padding=4)
-        tools_frame.pack(fill=tk.X, pady=4)
+        # Araçlar
+        tools_group = ttk.LabelFrame(mid_panel, text="Düzenleme Araçları", padding=4)
+        tools_group.pack(fill=tk.X, side=tk.BOTTOM, pady=(4, 0))
         
-        # Grid Mode Toggle
-        self.grid_btn = ttk.Button(tools_frame, text="📏 Kılavuz Modu: KAPALI", command=self._toggle_grid_mode)
+        self.grid_btn = ttk.Button(tools_group, text="📏 Kılavuz Modu: KAPALI", command=self._toggle_grid_mode)
         self.grid_btn.pack(fill=tk.X, pady=2)
         
-        ttk.Button(tools_frame, text="↔ Aralıkları Eşitle", command=self._distribute_grid).pack(fill=tk.X, pady=2)
-        ttk.Button(tools_frame, text="✅ Kılavuzdan Kare Üret", command=self._apply_grid_to_frames).pack(fill=tk.X, pady=2)
+        grid_actions = ttk.Frame(tools_group)
+        grid_actions.pack(fill=tk.X)
+        ttk.Button(grid_actions, text="↔ Eşitle", command=self._distribute_grid).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(grid_actions, text="✅ Kareleri Üret", command=self._apply_grid_to_frames).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         
-        # Legacy Auto Slice (Alternatif olarak kalsın mı? Yer kazanmak için kaldırabiliriz veya alta atabiliriz)
-        # ttk.Button(tools_frame, text="⚡ Manuel Kesim...", command=self._open_auto_slice_dialog).pack(fill=tk.X, pady=2)
-        
-        # Sıralama Menüsü
-        self.sort_var = tk.StringVar()
-        sort_btn = ttk.Menubutton(tools_frame, text="Sırala", direction="below")
-        sort_menu = tk.Menu(sort_btn, tearoff=False)
-        sort_menu.add_command(label="Satır Öncelikli (Z)", command=lambda: self._sort_frames("row"))
-        sort_menu.add_command(label="Sütun Öncelikli (N)", command=lambda: self._sort_frames("col"))
-        sort_btn["menu"] = sort_menu
-        sort_btn.pack(fill=tk.X, pady=2)
-
-        play_frame = ttk.LabelFrame(mid_panel, text="Oynatma", padding=4)
-        play_frame.pack(fill=tk.X, pady=4)
-        
-        ttk.Label(play_frame, text="Kare (ms):").pack(side=tk.LEFT)
-        self.frame_ms_var = tk.StringVar(value="120")
-        ttk.Entry(play_frame, textvariable=self.frame_ms_var, width=5).pack(side=tk.LEFT, padx=2)
-        
-        ttk.Button(play_frame, text="▶", width=4, command=self._preview_play).pack(side=tk.LEFT, padx=4)
-        ttk.Button(play_frame, text="■", width=4, command=self._preview_stop).pack(side=tk.LEFT)
-
-        # 3. Sağ Panel: Canvas (Sprite Sheet)
+        # 3. Sağ Panel: Düzenleyici Canvas
         right_panel = ttk.LabelFrame(self.paned, text="Sprite Sheet Düzenleyici", padding=4)
         self.paned.add(right_panel, weight=3)
         
-        self.canvas = tk.Canvas(right_panel, bg="black")
+        self.canvas = tk.Canvas(right_panel, bg="#1a1a1a", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         
         self.canvas.bind("<Button-1>", self._on_canvas_down)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_up)
-        # Yeni grid etkileşimleri
         self.canvas.bind("<Double-Button-1>", self._on_canvas_double_click)
-        self.canvas.bind("<Button-2>", self._on_canvas_right_click) # Mac trackpad
-        self.canvas.bind("<Button-3>", self._on_canvas_right_click) # Windows/Mouse sağ tık
+        self.canvas.bind("<Button-2>", self._on_canvas_right_click)
+        self.canvas.bind("<Button-3>", self._on_canvas_right_click)
 
         # Alt Durum Çubuğu
-        status = ttk.Frame(self)
+        status = ttk.Frame(self, padding=2)
         status.pack(side=tk.BOTTOM, fill=tk.X)
         self.status_var = tk.StringVar(value="Hazır")
-        ttk.Label(status, textvariable=self.status_var).pack(side=tk.LEFT, padx=6)
-
-    # --- DB İşlemleri ---
+        ttk.Label(status, textvariable=self.status_var, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=6)
 
     def _refresh_effects_list(self):
         """Veritabanındaki efektleri listeye doldurur."""
@@ -342,10 +344,15 @@ class EffectsManagerWindow(tk.Toplevel):
         rw, rh = int(iw * self._scale), int(ih * self._scale)
         rz = self._pil_image.resize((rw, rh), Image.LANCZOS)
         self._tk_image = ImageTk.PhotoImage(rz)
+        
         self.canvas.delete("all")
+        self._draw_gradient_background(self.canvas, rw, rh)
         self.canvas.create_image(0, 0, anchor="nw", image=self._tk_image, tags=("img",))
         self.canvas.config(width=rw, height=rh, scrollregion=(0, 0, rw, rh))
         self._draw_overlays()
+        
+        # Preview canvas arkaplanını da güncelle
+        self._draw_gradient_background(self.preview_canvas, self.preview_canvas.winfo_width(), 180)
 
     def _scale_to_image(self, x: int, y: int) -> Tuple[int, int]:
         """Canvas piksel koordinatını kaynak görsel pikseline dönüştürür."""
@@ -516,52 +523,134 @@ class EffectsManagerWindow(tk.Toplevel):
         self.listbox.select_set(0, tk.END)
         return "break"  # Event'in varsayılan davranışını engelle
 
+    def _on_listbox_select(self, event=None) -> None:
+        """Listeden seçim yapıldığında ilgili kareyi önizleme alanında gösterir."""
+        sel = self.listbox.curselection()
+        if not sel or not self._pil_image:
+            return
+            
+        # Seçili karelerin ilkini önizlemede göster (veya hepsi seçiliyse oynatmayı tetikle?)
+        idx = sel[0]
+        if 0 <= idx < len(self.frames):
+            fr = self.frames[idx]
+            self._show_single_frame_preview(fr)
+
+    def _show_single_frame_preview(self, frame: dict) -> None:
+        """Tek bir kareyi önizleme kanvasında gösterir."""
+        if not self._pil_image:
+            return
+            
+        box = (frame['x'], frame['y'], frame['x'] + frame['w'], frame['y'] + frame['h'])
+        try:
+            crop = self._pil_image.crop(box)
+            pw = self.preview_canvas.winfo_width()
+            ph = self.preview_canvas.winfo_height()
+            if pw < 10: pw, ph = 300, 180
+            
+            # Orantılı ölçekle (stretch yapmadan)
+            iw, ih = crop.size
+            scale = min(pw / iw, ph / ih)
+            if scale > 2.0: scale = 2.0 # Çok küçükse max 2 kat büyüt
+            
+            rw, rh = int(iw * scale), int(ih * scale)
+            rz = crop.resize((rw, rh), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(rz)
+            
+            self.preview_canvas.delete("pv")
+            self._draw_gradient_background(self.preview_canvas, pw, ph)
+            self.preview_canvas.create_image(pw//2, ph//2, anchor="center", image=photo, tags=("pv",))
+            self._single_pv_ref = photo # GC önlemi
+        except Exception:
+            pass
+
     def _select_from_list(self) -> None:
-        """Listeden seçim yapıldığında, ilgili kareyi vurgular (geleceğe hazır)."""
-        # Şimdilik ek bir vurgulama yapmıyoruz; overlay tüm kareleri gösteriyor.
         pass
 
     def _preview_play(self) -> None:
-        """Kareleri canvas üzerinde sırayla göstererek hızlı bir önizleme oynatır."""
+        """Kareleri önizleme kanvasında sırayla oynatır."""
         if not self.frames or not self._pil_image:
             return
+        
+        self._preview_stop() # Varsa eskiyi durdur
+        
         try:
             dur = max(1, int(self.frame_ms_var.get()))
         except Exception:
             dur = 120
-        # Önceden yaratılan image objelerini saklayalım
-        seq_imgs: List[ImageTk.PhotoImage] = []
-        crops = []
+
+        # Önizleme görsellerini hazırla
+        pw = self.preview_canvas.winfo_width()
+        ph = self.preview_canvas.winfo_height()
+        if pw < 10: pw, ph = 300, 180
+        
+        self._preview_refs = []
         for fr in self.frames:
             box = (fr['x'], fr['y'], fr['x'] + fr['w'], fr['y'] + fr['h'])
             try:
                 crop = self._pil_image.crop(box)
-                rw = int(crop.size[0] * self._scale)
-                rh = int(crop.size[1] * self._scale)
-                crop_rz = crop.resize((rw, rh), Image.LANCZOS)
-                seq_imgs.append(ImageTk.PhotoImage(crop_rz))
-                crops.append((seq_imgs[-1], rw, rh))
+                iw, ih = crop.size
+                scale = min(pw / iw, ph / ih)
+                if scale > 2.0: scale = 2.0
+                rw, rh = int(iw * scale), int(ih * scale)
+                rz = crop.resize((rw, rh), Image.LANCZOS)
+                self._preview_refs.append(ImageTk.PhotoImage(rz))
             except Exception:
                 continue
 
-        def step(i: int) -> None:
-            self.canvas.delete("pv")
-            if i >= len(crops):
-                return
-            img_ref, rw, rh = crops[i]
-            # Sol üstte göster
-            self.canvas.create_image(0, 0, anchor="nw", image=img_ref, tags=("pv",))
-            # Tekrar schedule
-            self.after(dur, lambda: step(i + 1))
+        if not self._preview_refs:
+            return
 
-        # Referansı sakla ki GC olmasın
-        self._preview_refs = seq_imgs
-        step(0)
+        self._preview_loop_idx = 0
+        self._run_preview_loop(dur, pw, ph)
+
+    def _run_preview_loop(self, dur: int, pw: int, ph: int) -> None:
+        if not self._preview_refs:
+            return
+            
+        idx = self._preview_loop_idx % len(self._preview_refs)
+        img_ref = self._preview_refs[idx]
+        
+        self.preview_canvas.delete("pv")
+        self._draw_gradient_background(self.preview_canvas, pw, ph)
+        self.preview_canvas.create_image(pw//2, ph//2, anchor="center", image=img_ref, tags=("pv",))
+        
+        self._preview_loop_idx += 1
+        self._preview_job = self.after(dur, lambda: self._run_preview_loop(dur, pw, ph))
 
     def _preview_stop(self) -> None:
-        """Önizlemeyi temizler."""
-        self.canvas.delete("pv")
+        """Önizlemeyi durdurur."""
+        if self._preview_job:
+            self.after_cancel(self._preview_job)
+            self._preview_job = None
+        self.preview_canvas.delete("pv")
         self._preview_refs = []
+        # Gradient'i temizle/yenile
+        self._draw_gradient_background(self.preview_canvas, self.preview_canvas.winfo_width(), 180)
+
+    def _draw_gradient_background(self, canvas: tk.Canvas, w: int, h: int) -> None:
+        """Kanvasa şık bir koyu gradient çizer."""
+        if w < 10 or h < 10: return
+        try:
+            canvas.delete("bg_grad")
+            top_color = (40, 44, 52)
+            bottom_color = (15, 17, 20)
+            grad_img = Image.new('RGB', (1, h))
+            for y in range(h):
+                r = int(top_color[0] + (bottom_color[0] - top_color[0]) * (y / h))
+                g = int(top_color[1] + (bottom_color[1] - top_color[1]) * (y / h))
+                b = int(top_color[2] + (bottom_color[2] - top_color[2]) * (y / h))
+                grad_img.putpixel((0, y), (r, g, b))
+            full_bg = grad_img.resize((w, h), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(full_bg)
+            canvas.create_image(0, 0, anchor="nw", image=photo, tags=("bg_grad",))
+            # Tag'i en alta it
+            canvas.tag_lower("bg_grad")
+            
+            # Referansı sakla
+            if not hasattr(self, "_bg_refs"): self._bg_refs = {}
+            self._bg_refs[str(canvas)] = photo
+        except Exception:
+            pass
 
     def _save_effect(self) -> None:
         """Efekti veritabanına kaydeder veya günceller."""

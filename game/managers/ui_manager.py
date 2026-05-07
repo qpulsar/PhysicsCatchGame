@@ -44,6 +44,8 @@ class UIManager:
         self.help_menu_bg: Optional[Surface] = None
         # Help menu anchor position: 'top-right' | 'top-left'
         self.help_area: str = 'top-right'
+        self._font_cache: dict[str, pygame.font.Font] = {}
+        self._fonts_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets', 'fonts')
         self._load_ui_elements()
     
     def _load_ui_elements(self) -> None:
@@ -97,24 +99,39 @@ class UIManager:
         x: int,
         y: int,
         color: Tuple[int, int, int],
-        align: str = "center"
+        align: str = "center",
+        font_name: Optional[str] = None
     ) -> Rect:
-        """Draw text on the surface with the specified alignment.
+        """Draw text on the surface with the specified alignment and optional custom font.
         
         Args:
             surface: The pygame surface to draw on.
             text: The text to render.
-            size: Font size ('small', 'medium', 'large', or default).
+            size: Font size ('small', 'medium', 'large') or numeric size.
             x: X-coordinate for text position.
             y: Y-coordinate for text position.
             color: Text color as an RGB tuple.
             align: Text alignment ('left', 'center', or 'right').
+            font_name: Optional filename of the TTF font in assets/fonts.
             
         Returns:
             The pygame.Rect of the rendered text.
         """
         # Select appropriate font
-        font = self._get_font(size)
+        if font_name and font_name != "Arial":
+            # Determine numeric size
+            num_size = 24
+            if isinstance(size, int):
+                num_size = size
+            elif size == 'small': num_size = 22
+            elif size == 'medium': num_size = 28
+            elif size == 'large': num_size = 64
+            elif isinstance(size, str) and size.isdigit():
+                num_size = int(size)
+                
+            font = self._get_custom_font(font_name, num_size)
+        else:
+            font = self._get_font(str(size))
         
         # Render text
         text_surface = font.render(str(text), True, color)
@@ -147,6 +164,25 @@ class UIManager:
             'medium': self.medium_font,
             'large': self.large_font
         }.get(size.lower(), self.font)
+
+    def _get_custom_font(self, font_name: str, size: int) -> Font:
+        """Loads and caches a custom TTF font from assets/fonts."""
+        cache_key = f"{font_name}_{size}"
+        if cache_key in self._font_cache:
+            return self._font_cache[cache_key]
+        
+        font_path = os.path.join(self._fonts_root, font_name)
+        if not os.path.exists(font_path):
+            # Fallback to default
+            return pygame.font.Font(None, size)
+            
+        try:
+            font = pygame.font.Font(font_path, size)
+            self._font_cache[cache_key] = font
+            return font
+        except Exception as e:
+            print(f"Error loading custom font {font_name}: {e}")
+            return pygame.font.Font(None, size)
     
     def draw_hud(
         self,

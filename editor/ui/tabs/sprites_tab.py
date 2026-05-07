@@ -130,10 +130,8 @@ class SpritesTab:
         # Info row (management hint + refresh)
         button_frame = ttk.Frame(pane)
         button_frame.grid(row=1, column=0, sticky="ew", pady=(5,0))
-        ttk.Label(button_frame, text="Bu sekme sadece seçim içindir. Yönetim ScreenDesigner/Level ekranlarında yapılır.").pack(side=tk.LEFT)
         # Debug & refresh controls
         ttk.Button(button_frame, text="Yenile", command=self.refresh).pack(side=tk.RIGHT)
-        ttk.Button(button_frame, text="Debug: Sprite Kontrol", command=self._debug_regions_check).pack(side=tk.RIGHT, padx=(0,6))
         ttk.Button(button_frame, text="Otomatik Tespit", command=self._auto_detect_buttons).pack(side=tk.RIGHT, padx=(0,6))
         
         # Regions management
@@ -166,11 +164,12 @@ class SpritesTab:
         # Viewer Frame (küçültülmüş ana önizleme)
         viewer_frame = ttk.LabelFrame(pane, text="Önizleme", padding=5)
         viewer_frame.grid(row=0, column=0, sticky="nsew", pady=5)
-        # Ana görsel için daha küçük bir canvas ve sabit maksimum boyut
-        self._main_preview_max = (500, 300)
-        self.image_canvas = tk.Canvas(viewer_frame, width=self._main_preview_max[0], height=self._main_preview_max[1], background="white")
-        self.image_canvas.pack(fill="x", expand=False)
+        # Ana görsel için dinamik büyüyen canvas
+        self._main_preview_max = (800, 500)
+        self.image_canvas = tk.Canvas(viewer_frame, background="white")
+        self.image_canvas.pack(fill="both", expand=True)
         self.image_canvas.bind("<Double-1>", self._open_cropper)
+        self.image_canvas.bind("<Configure>", lambda e: self._on_canvas_resize())
 
         # Seçili görsel yol bilgisi
         sel_frame = ttk.Frame(viewer_frame)
@@ -225,7 +224,12 @@ class SpritesTab:
         abs_path = os.path.join(project_root, rel_path)
         if os.path.exists(abs_path):
             image = Image.open(abs_path)
-            self._display_image_on_canvas(self.image_canvas, image, *self._main_preview_max)
+            # Kanvasın o anki boyutunu al ve ona göre ölçekle
+            self.image_canvas.update_idletasks()
+            cw = self.image_canvas.winfo_width()
+            ch = self.image_canvas.winfo_height()
+            if cw < 50: cw, ch = self._main_preview_max
+            self._display_image_on_canvas(self.image_canvas, image, cw, ch)
 
     def _add_sheet(self):
         messagebox.showinfo("Bilgi", "Bu sekmede varlık yönetimi devre dışı. Yalnızca seçim yapılır.")
@@ -834,20 +838,42 @@ class SpritesTab:
         except Exception:
             pass
 
+    def _on_canvas_resize(self):
+        """Pencere/Kanvas boyutu değiştiğinde önizlemeyi gecikmeli (debounce) günceller."""
+        if hasattr(self, "_resize_timer"):
+            self.frame.after_cancel(self._resize_timer)
+        self._resize_timer = self.frame.after(200, self._perform_delayed_resize)
+
+    def _perform_delayed_resize(self):
+        """Asıl boyutlandırma işlemini yapar."""
+        selection = self.sheets_tree.selection()
+        if not selection:
+            return
+        iid = selection[0]
+        rel = self._index_to_path.get(iid)
+        if rel:
+            self._load_image(rel)
+
     def _display_image_on_canvas(self, canvas: tk.Canvas, pil_image: Image.Image, max_w: int, max_h: int) -> None:
-        """PIL görüntüyü orana sadık kalarak belirtilen alana sığdırıp canvas'a çizer."""
+        """PIL görüntüyü orana sadık kalarak belirtilen alana sığdırıp (stretch yapmadan) canvas'a çizer."""
         try:
+            canvas.delete("all")
+            # 1. Gradient arkaplanı çiz
+            self._draw_gradient_background(canvas, max_w, max_h)
+            
+            # 2. Resmi ölçekle (sadece gerekliyse küçült, asla büyütme/stretch yapma)
             iw, ih = pil_image.size
             scale = min(max_w / max(1, iw), max_h / max(1, ih))
+            if scale > 1.0: scale = 1.0 # Stretch yapma, orijinal boyutu koru
+            
             new_w = max(1, int(iw * scale))
             new_h = max(1, int(ih * scale))
             resized = pil_image.resize((new_w, new_h), Image.LANCZOS)
             photo = ImageTk.PhotoImage(resized)
-            # Canvas boyutunu sabit tut (görsel merkezli)
-            canvas.configure(width=max_w, height=max_h)
-            x = (max_w - new_w) // 2
-            y = (max_h - new_h) // 2
-            canvas.create_image(x, y, anchor="nw", image=photo)
+            
+            # Ortala
+            canvas.create_image(max_w//2, max_h//2, anchor="center", image=photo)
+            
             # Referansı sakla; aksi halde GC edilir
             if canvas is self.image_canvas:
                 self.tk_image = photo
@@ -855,6 +881,30 @@ class SpritesTab:
                 self.tk_region_image = photo
         except Exception:
             pass
+
+    def _draw_gradient_background(self, canvas: tk.Canvas, w: int, h: int) -> None:
+        """Belirtilen kanvasa şık bir koyu gradient çizer."""
+        if w < 10 or h < 10: return
+        
+        top_color = (45, 49, 58)    # Koyu gri
+        bottom_color = (20, 22, 26) # Siyahımsı
+        
+        grad_img = Image.new('RGB', (1, h))
+        for y in range(h):
+            r = int(top_color[0] + (bottom_color[0] - top_color[0]) * (y / h))
+            g = int(top_color[1] + (bottom_color[1] - top_color[1]) * (y / h))
+            b = int(top_color[2] + (bottom_color[2] - top_color[2]) * (y / h))
+            grad_img.putpixel((0, y), (r, g, b))
+            
+        full_bg = grad_img.resize((w, h), Image.LANCZOS)
+        photo = ImageTk.PhotoImage(full_bg)
+        canvas.create_image(0, 0, anchor="nw", image=photo)
+        
+        # Referansı sakla (GC önlemi)
+        if canvas is self.image_canvas:
+            self.tk_grad_main = photo
+        else:
+            self.tk_grad_region = photo
 
     def _get_selected_region_entry(self) -> Optional[Dict]:
         sel = self.regions_tree.selection()

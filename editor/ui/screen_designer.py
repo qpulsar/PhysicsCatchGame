@@ -33,6 +33,8 @@ from typing import Dict, Any, Optional, List
 
 from PIL import Image, ImageTk
 
+from .font_manager import FontManagerWindow
+
 
 class ScreenDesignerWindow(tk.Toplevel):
     """Toplevel pencere: Tek kanvaslı, sürükle-bırak ekran tasarımcısı.
@@ -48,7 +50,7 @@ class ScreenDesignerWindow(tk.Toplevel):
     CANVAS_H = 768
 
     def __init__(self, parent: tk.Tk, game_id: int, screen_service, sprite_service, game_service, level_service=None,
-                 effect_service=None, screen_name: str = "opening", screen_type: str = "menu"):
+                 effect_service=None, screen_name: str = "opening", screen_type: str = "menu", on_save_callback=None):
         """Designer'ı başlatır.
 
         Args:
@@ -84,6 +86,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.effect_service = effect_service
         self.screen_name = screen_name
         self.screen_type = screen_type
+        self.on_save_callback = on_save_callback
 
         self._bg_img_ref: Optional[ImageTk.PhotoImage] = None
         self._canvas_bg_path: Optional[str] = None
@@ -122,6 +125,8 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._effect_name_to_params: Dict[str, Dict[str, Any]] = {}
         self._effect_image_to_name: Dict[str, str] = {}
         self._effect_name_to_id: Dict[str, int] = {}
+        
+        self._updating_sidebar = False  # Flag to prevent loops/overwrite during selection
 
         # UI Değişkenleri (Erken Tanım)
         self.zoom_var = tk.StringVar(value="100%")
@@ -133,11 +138,15 @@ class ScreenDesignerWindow(tk.Toplevel):
         # Label
         self.label_color_var = tk.StringVar(value="#FFFFFF")
         self.label_size_var = tk.StringVar(value="20")
+        self.label_font_var = tk.StringVar(value="Arial")
         
         # Buton
         self.button_text_var = tk.StringVar(value="Buton")
         self.button_action_var = tk.StringVar(value="start_game")
+        self.button_action_var.trace_add('write', lambda *args: self._run_linter())
         self.button_color_var = tk.StringVar(value="#4CAF50")
+        self.button_font_var = tk.StringVar(value="Arial")
+        self.button_font_size_var = tk.StringVar(value="18")
         self.button_sprite_var = tk.StringVar()
         
         # Sprite
@@ -177,6 +186,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         except Exception:
             pass
         self._load_existing()
+        self.after(500, self._auto_fit_zoom)
 
     def _apply_theme(self) -> None:
         """Modern koyu tema ayarlarını ve stillerini yapılandırır."""
@@ -254,11 +264,11 @@ class ScreenDesignerWindow(tk.Toplevel):
         
         # Zoom kontrolleri
         ttk.Label(toolbar, text="Zoom:", background="#313335").pack(side=tk.LEFT, padx=(10, 2))
-        zoom_box = ttk.Combobox(toolbar, textvariable=self.zoom_var, state="readonly", width=6,
-                                 values=["50%", "75%", "100%", "125%", "150%"])
-        zoom_box.pack(side=tk.LEFT)
-        zoom_box.bind("<<ComboboxSelected>>", lambda e: self._on_zoom_change())
-
+        self.zoom_box = ttk.Combobox(toolbar, textvariable=self.zoom_var, state="readonly", width=6,
+                                 values=["50%", "75%", "100%", "125%", "150%", "200%", "Fit"])
+        self.zoom_box.pack(side=tk.LEFT)
+        self.zoom_box.bind("<<ComboboxSelected>>", lambda e: self._on_zoom_change())
+        
         # Sağ taraf toolbar butonları
         ttk.Button(toolbar, text="Kapat", command=self.destroy).pack(side=tk.RIGHT, padx=5)
         self.save_btn = ttk.Button(toolbar, text="KAYDET", command=self._save, style="Accent.TButton")
@@ -350,6 +360,11 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.canvas.bind("<Button-1>", self._on_canvas_click)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_drag_end)
+        
+        # Mouse wheel zoom (Ctrl + Scroll)
+        self.canvas.bind("<Control-MouseWheel>", self._on_mouse_wheel_zoom) # Mac/Win
+        self.canvas.bind("<Control-Button-4>", self._on_mouse_wheel_zoom) # Linux
+        self.canvas.bind("<Control-Button-5>", self._on_mouse_wheel_zoom)
 
         # Önizleme (Preview) Elemanları (Sepet, Efekt vb.)
         self._create_canvas_previews()
@@ -444,11 +459,17 @@ class ScreenDesignerWindow(tk.Toplevel):
         l_row2.pack(fill="x", pady=5)
         ttk.Label(l_row2, text="Boyut:").pack(side=tk.LEFT)
         ttk.Entry(l_row2, textvariable=self.label_size_var, width=5).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(l_row2, text="Font:").pack(side=tk.LEFT, padx=(10, 0))
+        self.label_font_combo = ttk.Combobox(l_row2, textvariable=self.label_font_var, width=15, state="readonly")
+        self.label_font_combo.pack(side=tk.LEFT, padx=5)
+        self.label_font_combo.bind("<<ComboboxSelected>>", lambda e: (self._apply_label_props(), self._set_dirty(True)))
 
         # Bindings
         self.label_text.bind("<KeyRelease>", lambda e: (self._apply_label_props(), self._set_dirty(True)))
         self.label_color_var.trace_add('write', lambda *args: (self._apply_label_props(), self._set_dirty(True)))
         self.label_size_var.trace_add('write', lambda *args: (self._apply_label_props(), self._set_dirty(True)))
+        self.label_font_var.trace_add('write', lambda *args: (self._apply_label_props(), self._set_dirty(True)))
 
         # 3. Button Props
         self.button_frame = ttk.LabelFrame(parent, text="Buton Ayarları")
@@ -457,14 +478,25 @@ class ScreenDesignerWindow(tk.Toplevel):
         ttk.Entry(self.button_frame, textvariable=self.button_text_var).pack(fill="x", pady=(0,5))
         
         ttk.Label(self.button_frame, text="Aksiyon:").pack(anchor="w")
-        ttk.Combobox(self.button_frame, textvariable=self.button_action_var, state="readonly",
-                     values=["start_game", "continue_level", "next_level", "back"]).pack(fill="x", pady=(0,5))
+        self.btn_action_combo = ttk.Combobox(self.button_frame, textvariable=self.button_action_var, state="readonly",
+                     values=["start_game", "continue_level", "next_level", "back", "restart_game", "quit", "toggle_help"])
+        self.btn_action_combo.pack(fill="x", pady=(0,5))
         
         b_row = ttk.Frame(self.button_frame)
-        b_row.pack(fill="x")
+        b_row.pack(fill="x", pady=5)
         ttk.Label(b_row, text="Renk:").pack(side=tk.LEFT)
         ttk.Entry(b_row, textvariable=self.button_color_var, width=8).pack(side=tk.LEFT, padx=5)
         ttk.Button(b_row, text="Seç", command=self._pick_button_color, width=4).pack(side=tk.LEFT)
+
+        b_font_row = ttk.Frame(self.button_frame)
+        b_font_row.pack(fill="x", pady=5)
+        ttk.Label(b_font_row, text="Font:").pack(side=tk.LEFT)
+        self.button_font_combo = ttk.Combobox(b_font_row, textvariable=self.button_font_var, width=12, state="readonly")
+        self.button_font_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Button(b_font_row, text="M", command=self._open_font_manager_btn, width=2).pack(side=tk.LEFT)
+        
+        ttk.Label(b_font_row, text="S:").pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Entry(b_font_row, textvariable=self.button_font_size_var, width=4).pack(side=tk.LEFT)
 
         ttk.Label(self.button_frame, text="Sprite Bölgesi:").pack(anchor="w", pady=(5,0))
         self.button_sprite_combo = ttk.Combobox(self.button_frame, textvariable=self.button_sprite_var, state="readonly")
@@ -475,6 +507,8 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.button_text_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
         self.button_action_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
         self.button_color_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
+        self.button_font_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
+        self.button_font_size_var.trace_add('write', lambda *args: (self._apply_button_props(), self._set_dirty(True)))
 
         # 4. Sprite Props
         self.sprite_frame = ttk.LabelFrame(parent, text="Görsel (Sprite) Ayarları")
@@ -627,6 +661,14 @@ class ScreenDesignerWindow(tk.Toplevel):
         
         if (self.screen_type or "").lower() == "level":
             self.level_frame.pack(fill="both", expand=True, pady=5)
+
+        # 6. Screen Linter (Smart Reminders)
+        self.linter_frame = ttk.LabelFrame(parent, text="Akıllı Hatırlatıcı 💡")
+        self.linter_frame.pack(fill="x", side="bottom", pady=10)
+        self.linter_label = ttk.Label(self.linter_frame, text="Kontrol ediliyor...", foreground="#aaaaaa", wraplength=200)
+        self.linter_label.pack(fill="x", padx=5, pady=5)
+        
+        self.after(1000, self._run_linter)
 
 
     # Palette actions
@@ -1149,11 +1191,51 @@ class ScreenDesignerWindow(tk.Toplevel):
     def _to_logical(self, v: float) -> float:
         return v / self.zoom if self.zoom else v
 
+    def _update_zoom_ui(self):
+        """Mevcut self.zoom değerini dropbox'a yansıtır."""
+        pct = f"{int(self.zoom * 100)}%"
+        if pct not in self.zoom_box['values']:
+             vals = list(self.zoom_box['values'])
+             if "Fit" in vals: vals.remove("Fit")
+             vals.append(pct)
+             self.zoom_box['values'] = sorted(vals, key=lambda x: int(x.replace('%','')) if '%' in x else 0) + ["Fit"]
+        self.zoom_var.set(pct)
+
+    def _auto_fit_zoom(self):
+        """Pencere boyutuna göre en uygun zoom seviyesini bulur."""
+        self.update_idletasks()
+        # Orta panel genişliği (canvas'ın içinde bulunduğu alan)
+        win_w = self.canvas.winfo_width()
+        win_h = self.canvas.winfo_height()
+        
+        if win_w < 100 or win_h < 100:
+            # Henüz tam çizilmemiş olabilir, biraz sonra tekrar dene
+            self.after(200, self._auto_fit_zoom)
+            return
+        
+        # Kenar boşluklarını düş (40px)
+        zoom_w = (win_w - 40) / self.CANVAS_W
+        zoom_h = (win_h - 40) / self.CANVAS_H
+        best_zoom = min(zoom_w, zoom_h)
+        
+        # Makul sınırlar ve %5 basamaklar
+        best_zoom = max(0.25, min(2.0, best_zoom))
+        pct = int(best_zoom * 100)
+        pct = (pct // 5) * 5
+        
+        self.zoom_var.set(f"{pct}%")
+        self._on_zoom_change()
+
     def _on_zoom_change(self) -> None:
-        val = self.zoom_var.get().strip().replace('%', '')
+        val = self.zoom_var.get().strip()
+        if val == "Fit":
+            self._auto_fit_zoom()
+            return
+            
+        val = val.replace('%', '')
         try:
             pct = int(val)
-            if pct < 25 or pct > 300:
+            if pct < 25 or pct > 400:
                 raise ValueError
         except ValueError:
             self.zoom = 1.0
@@ -1171,6 +1253,19 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._update_item_bg_preview()
         # Efekt önizlemeyi de yeniden konumlandır
         self._restart_effect_preview()
+
+    def _on_mouse_wheel_zoom(self, event):
+        """Ctrl + MouseWheel ile zoom yapar."""
+        # Mac'te delta genellikle +-1 veya +-120 gelir
+        if event.num == 4 or (hasattr(event, 'delta') and event.delta > 0):
+            new_pct = int(self.zoom * 100) + 5
+        else:
+            new_pct = int(self.zoom * 100) - 5
+        
+        new_pct = max(25, min(400, new_pct))
+        self.zoom = new_pct / 100.0
+        self._update_zoom_ui()
+        self._on_zoom_change()
 
     # Asset scanning
     def _scan_assets(self) -> None:
@@ -1382,9 +1477,9 @@ class ScreenDesignerWindow(tk.Toplevel):
         x, y = 100, 100
         text = "Yeni Label"
         cx, cy = int(self._to_canvas(x)), int(self._to_canvas(y))
-        cid = self.canvas.create_text(cx, cy, text=text, fill="#FFFFFF", anchor="nw", font=("Segoe UI", 20))
+        cid = self.canvas.create_text(cx, cy, text=text, fill="#FFFFFF", anchor="nw", font=("Arial", 20))
         name = self._gen_name("label")
-        item = {"id": cid, "type": "label", "props": {"name": name, "text": text, "color": "#FFFFFF", "font_size": 20, "x": x, "y": y}}
+        item = {"id": cid, "type": "label", "props": {"name": name, "text": text, "color": "#FFFFFF", "font_size": 20, "font": "Arial", "x": x, "y": y}}
         self.items.append(item)
         self._select_item(item)
         # Insert into tree and select
@@ -1399,14 +1494,8 @@ class ScreenDesignerWindow(tk.Toplevel):
             pass
 
     def _apply_image_sprite(self) -> None:
-        """Seçili image-only sprite öğesine combobox'tan seçilen sprite bölgesini uygular ve çizer.
-
-        - Combobox değeri "name — image_rel" formatındadır.
-        - Bölgeyi bulup kırpılmış resmi oluşturur, kanvasa image olarak yerleştirir.
-        - Öğenin genişlik/yüksekliğini bölge ölçülerine göre günceller.
-        - item.props.sprite alanına meta veriyi yazar.
-        """
-        if not self.selected_item or self.selected_item["type"] != "image":
+        """Seçili image-only sprite öğesine combobox'tan seçilen sprite bölgesini uygular ve çizer."""
+        if getattr(self, "_updating_sidebar", False) or not self.selected_item or self.selected_item["type"] != "image":
             return
         key = self.image_sprite_var.get().strip()
         if not key or " — " not in key:
@@ -1481,6 +1570,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         item = {"id": rect, "type": "button", "props": {"name": name, "text": "Başla", "action": "start_game", "w": w, "h": h, "x": x, "y": y, "label_id": label}}
         self.items.append(item)
         self._select_item(item)
+        self._run_linter()
         # Insert into tree and select
         try:
             self.obj_tree.insert("", tk.END, iid=str(rect), values=(f"{name} (button)",))
@@ -1504,6 +1594,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         item = {"id": rect, "type": "button", "props": {"name": name, "text": "Devam", "action": "continue_level", "w": w, "h": h, "x": x, "y": y, "label_id": label}}
         self.items.append(item)
         self._select_item(item)
+        self._run_linter()
         try:
             self.obj_tree.insert("", tk.END, iid=str(rect), values=(f"{name} (button)",))
             self.obj_tree.selection_set(str(rect))
@@ -1563,6 +1654,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._set_dirty(True)
 
     def _select_item(self, item: Optional[Dict[str, Any]]) -> None:
+        self._updating_sidebar = True
         self.selected_item = item
         # toggle prop panels
         self.label_frame.pack_forget(); self.button_frame.pack_forget(); self.sprite_frame.pack_forget()
@@ -1570,6 +1662,11 @@ class ScreenDesignerWindow(tk.Toplevel):
             return
         # set position fields
         self._refresh_position_fields()
+        # load available fonts
+        fonts = self._get_available_fonts()
+        self.label_font_combo['values'] = fonts
+        self.button_font_combo['values'] = fonts
+
         if item["type"] == "label":
             self.label_frame.pack(fill="x", pady=6)
             # load props
@@ -1577,11 +1674,14 @@ class ScreenDesignerWindow(tk.Toplevel):
             self.label_text.insert("1.0", item["props"].get("text", ""))
             self.label_color_var.set(item["props"].get("color", "#FFFFFF"))
             self.label_size_var.set(str(item["props"].get("font_size", 20)))
+            self.label_font_var.set(item["props"].get("font", "Arial"))
         elif item["type"] == "button":
             self.button_frame.pack(fill="x", pady=6)
             self.button_text_var.set(item["props"].get("text", ""))
             self.button_action_var.set(item["props"].get("action", "start_game"))
             self.button_color_var.set(item["props"].get("bg_color", "#4CAF50"))
+            self.button_font_var.set(item["props"].get("font", "Arial"))
+            self.button_font_size_var.set(str(item["props"].get("font_size", 18)))
             # load sprite regions and set selection if present (DB-backed)
             self._load_sprite_regions()
             sp = item["props"].get("sprite") or {}
@@ -1598,11 +1698,11 @@ class ScreenDesignerWindow(tk.Toplevel):
                 key = f"{sp.get('name')} — {sp.get('image')}"
                 if key in (self.image_sprite_combo['values'] or ()):  
                     self.image_sprite_var.set(key)
-        # ensure bg stays behind
         try:
             self.canvas.tag_lower("__bg__")
         except Exception:
             pass
+        self._updating_sidebar = False
 
     def _refresh_position_fields(self) -> None:
         if not self.selected_item:
@@ -1659,6 +1759,8 @@ class ScreenDesignerWindow(tk.Toplevel):
 
     def _set_dirty(self, dirty: bool) -> None:
         """Kaydedilmemiş değişiklik var/yok işaretini ve buton stilini yönetir."""
+        if getattr(self, "_updating_sidebar", False) and dirty:
+            return
         setattr(self, "_dirty", bool(dirty))
         try:
             self.save_btn.configure(style=("Accent.TButton" if dirty else "TButton"))
@@ -1678,38 +1780,150 @@ class ScreenDesignerWindow(tk.Toplevel):
             self.button_color_var.set(color)
 
     def _apply_label_props(self) -> None:
-        """Label özelliklerini uygular (metin, renk, punto)."""
-        if not self.selected_item or self.selected_item["type"] != "label":
+        """Label özelliklerini uygular (metin, renk, punto, font)."""
+        if self._updating_sidebar or not self.selected_item or self.selected_item["type"] != "label":
             return
         text = self.label_text.get("1.0", "end-1c")
         color = self.label_color_var.get().strip() or "#FFFFFF"
+        font_name = self.label_font_var.get().strip() or "Arial"
         try:
             size = int(self.label_size_var.get())
         except ValueError:
             size = 20
         it = self.selected_item
-        self.canvas.itemconfigure(it["id"], text=text, fill=color, font=("Segoe UI", size))
-        it["props"].update({"text": text, "color": color, "font_size": size})
+        
+        is_custom = font_name.lower().endswith(".ttf")
+        current_type = self.canvas.type(it["id"])
+        
+        if is_custom:
+            photo = self._render_text_as_image(text, font_name, size, color)
+            if photo:
+                if current_type == "text":
+                    # Swap text to image
+                    coords = self.canvas.coords(it["id"])
+                    self.canvas.delete(it["id"])
+                    it["id"] = self.canvas.create_image(coords[0], coords[1], anchor="nw", image=photo)
+                else:
+                    self.canvas.itemconfigure(it["id"], image=photo)
+                it["props"]["img_ref"] = photo
+                it["props"].update({"text": text, "color": color, "font_size": size, "font": font_name})
+                return
+
+        # Standard font or fallback
+        if current_type == "image":
+            # Swap image to text
+            coords = self.canvas.coords(it["id"])
+            self.canvas.delete(it["id"])
+            it["id"] = self.canvas.create_text(coords[0], coords[1], text=text, fill=color, anchor="nw")
+            
+        tk_font_name = font_name if font_name in ("Arial", "Courier", "Times") else "Arial"
+        self.canvas.itemconfigure(it["id"], text=text, fill=color, font=(tk_font_name, size))
+        it["props"].update({"text": text, "color": color, "font_size": size, "font": font_name})
+
+    def _open_font_manager(self):
+        """Font yöneticisi penceresini açar."""
+        assets_fonts = os.path.join(os.path.dirname(__file__), "../../assets/fonts")
+        FontManagerWindow(self, assets_fonts, self._on_font_selected)
+
+    def _on_font_selected(self, font_name: str):
+        """Seçilen fontu değişkene atar."""
+        if self.selected_item and self.selected_item["type"] == "button":
+            self.button_font_var.set(font_name)
+        else:
+            self.label_font_var.set(font_name)
+
+    def _open_font_manager_btn(self):
+        """Buton için font yöneticisini açar (Gerekirse ayırabiliriz ama aynı pencere yeterli)."""
+        self._open_font_manager()
+
+    def _render_text_as_image(self, text: str, font_name: str, size: int, color: str) -> Optional[Any]:
+        """Custom fontları tasarım ekranında göstermek için metni görsele render eder."""
+        from PIL import Image, ImageDraw, ImageFont, ImageTk
+        try:
+            if font_name in ("Arial", "Courier", "Times"):
+                 return None
+            
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            font_path = os.path.join(project_root, "assets/fonts", font_name)
+            if not os.path.exists(font_path):
+                return None
+            
+            zoom = getattr(self, "zoom", 1.0)
+            render_size = int(size * zoom)
+            if render_size < 1: render_size = 1
+            
+            pil_font = ImageFont.truetype(font_path, render_size)
+            bbox = pil_font.getbbox(text)
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+            
+            img = Image.new("RGBA", (max(1, w + 4), max(1, h + 4)), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            draw.text((-bbox[0] + 2, -bbox[1] + 2), text, font=pil_font, fill=color)
+            return ImageTk.PhotoImage(img)
+        except Exception as e:
+            print(f"[Designer] Font render hatası: {e}")
+            return None
+
+    def _get_available_fonts(self):
+        """assets/fonts klasöründeki fontları listeler."""
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+        font_dir = os.path.join(project_root, "assets/fonts")
+        fonts = ["Arial", "Courier", "Times"] # Temel sistem fontları
+        if os.path.exists(font_dir):
+            extra = [f for f in os.listdir(font_dir) if f.lower().endswith(".ttf")]
+            fonts.extend(sorted(extra))
+        return fonts
 
     def _apply_button_props(self) -> None:
-        """Buton özelliklerini uygular (metin, aksiyon)."""
-        if not self.selected_item or self.selected_item["type"] != "button":
+        """Buton özelliklerini uygular (metin, aksiyon, font)."""
+        if self._updating_sidebar or not self.selected_item or self.selected_item["type"] != "button":
             return
         txt = self.button_text_var.get().strip() or "Buton"
         act = self.button_action_var.get() or "start_game"
-        it = self.selected_item
-        # Update text label
-        self.canvas.itemconfigure(it["props"]["label_id"], text=txt)
-        # If no sprite selected, apply rect fill color
         bgc = self.button_color_var.get().strip() or "#4CAF50"
-        # If currently using rect, recolor; if using image keep image
+        font_name = self.button_font_var.get().strip() or "Arial"
+        try:
+            fsize = int(self.button_font_size_var.get())
+        except ValueError:
+            fsize = 18
+        it = self.selected_item
+        
+        # Update text label
+        is_custom = font_name.lower().endswith(".ttf")
+        lbl_id = it["props"]["label_id"]
+        current_lbl_type = self.canvas.type(lbl_id)
+        
+        if is_custom:
+            photo = self._render_text_as_image(txt, font_name, fsize, "#FFFFFF")
+            if photo:
+                if current_lbl_type == "text":
+                    coords = self.canvas.coords(lbl_id)
+                    self.canvas.delete(lbl_id)
+                    it["props"]["label_id"] = self.canvas.create_image(coords[0], coords[1], anchor="center", image=photo)
+                else:
+                    self.canvas.itemconfigure(lbl_id, image=photo)
+                it["props"]["label_img_ref"] = photo
+            else:
+                 is_custom = False # Fallback if rendering fails
+        
+        if not is_custom:
+            if current_lbl_type == "image":
+                coords = self.canvas.coords(lbl_id)
+                self.canvas.delete(lbl_id)
+                it["props"]["label_id"] = self.canvas.create_text(coords[0], coords[1], text=txt, fill="#FFFFFF", anchor="center")
+            
+            tk_font_name = font_name if font_name in ("Arial", "Courier", "Times") else "Arial"
+            self.canvas.itemconfigure(it["props"]["label_id"], text=txt, font=(tk_font_name, fsize))
+
+        # If no sprite selected, apply rect fill color
         if self.canvas.type(it["id"]) == 'rectangle':
             self.canvas.itemconfigure(it["id"], fill=bgc)
-        it["props"].update({"text": txt, "action": act, "bg_color": bgc})
+        it["props"].update({"text": txt, "action": act, "bg_color": bgc, "font": font_name, "font_size": fsize})
 
     def _apply_button_sprite(self) -> None:
         """Apply selected sprite region to the selected button and render it."""
-        if not self.selected_item or self.selected_item["type"] != "button":
+        if self._updating_sidebar or not self.selected_item or self.selected_item["type"] != "button":
             return
         key = self.button_sprite_var.get().strip()
         if not key:
@@ -1854,7 +2068,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                     "id": f"label_{it['id']}",
                     "type": "label",
                     "text": it["props"].get("text", ""),
-                    "font": {"name": "Segoe UI", "size": it["props"].get("font_size", 20)},
+                    "font": {"name": it["props"].get("font", "Arial"), "size": it["props"].get("font_size", 20)},
                     "color": it["props"].get("color", "#FFFFFF"),
                     "x": int(round(x)), "y": int(round(y)),
                     "anchor": "nw",
@@ -1874,7 +2088,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                         "sprite": (it["props"].get("sprite") or {"source": "placeholder", "frame": {"width": int(round(w)), "height": int(round(h))}}),
                         "text_overlay": {
                             "text": it["props"].get("text", "Buton"),
-                            "font": {"name": "Segoe UI", "size": 18},
+                            "font": {"name": it["props"].get("font", "Arial"), "size": it["props"].get("font_size", 18)},
                             "color": "#FFFFFF"
                         },
                         "action": it["props"].get("action", "start_game"),
@@ -1990,6 +2204,16 @@ class ScreenDesignerWindow(tk.Toplevel):
     def _save(self) -> None:
         """JSON'u DB'ye kaydeder (screens.name='opening')."""
         try:
+            # Linter check before save
+            missing = self._get_missing_essentials()
+            if missing:
+                msg = "Aşağıdaki önemli bileşenler eksik görünüyor:\n\n"
+                for m in missing:
+                    msg += f"• {m}\n"
+                msg += "\nYine de kaydetmek istiyor musunuz?"
+                if not messagebox.askyesno("Eksik Bileşen Uyarısı", msg):
+                    return
+
             data = self._collect_json()
             payload = json.dumps(data, ensure_ascii=False, indent=2)
             self.screen_service.upsert_screen(self.game_id, self.screen_name, self.screen_type, payload)
@@ -2003,14 +2227,151 @@ class ScreenDesignerWindow(tk.Toplevel):
                 ok_id = self._effect_name_to_id.get(ok_name)
                 bad_id = self._effect_name_to_id.get(bad_name)
                 
-                # DB Manager üzerinden update
-                # screen_service.db -> DatabaseManager
-                if hasattr(self.screen_service, 'db'):
-                    self.screen_service.db.update_level_effect_ids(self.level_id, ok_id, bad_id)
-                    
-            messagebox.showinfo("Kayıt", "Açılış ekranı kaydedildi.")
+            # Küçük resim (thumbnail) oluştur ve kaydet
+            self._save_thumbnail()
+            
+            # Parent pencereyi haberdar et (örneğin galeriyi yenilemek için)
+            if self.on_save_callback:
+                try:
+                    self.on_save_callback()
+                except Exception as e:
+                    print(f"[Designer] Callback hatası: {e}")
+
+            messagebox.showinfo("Kayıt", "Ekran tasarımı kaydedildi.")
         except Exception as e:
             messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
+
+    def _save_thumbnail(self) -> None:
+        """Ekranın o anki tasarımından bir önizleme (thumbnail) oluşturur ve dosyaya kaydet."""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            
+            # 1. Temel resmi oluştur (Siyah/Koyu gri arkaplan)
+            thumb = Image.new('RGB', (self.CANVAS_W, self.CANVAS_H), (40, 44, 52))
+            
+            # 2. Arkaplan görselini ekle
+            if self._canvas_bg_path and os.path.isfile(self._canvas_bg_path):
+                try:
+                    bg = Image.open(self._canvas_bg_path).convert('RGB')
+                    bg = bg.resize((self.CANVAS_W, self.CANVAS_H), Image.LANCZOS)
+                    thumb.paste(bg, (0, 0))
+                except: pass
+                
+            draw = ImageDraw.Draw(thumb)
+            
+            # Font yükleme (Büyük boyutta yazıların görünmesi için)
+            font = None
+            font_size = 40
+            try:
+                # Modern Pillow sürümleri için
+                font = ImageFont.load_default(size=font_size)
+            except:
+                # Eski Pillow fallback veya sistem fontları denemesi
+                try:
+                    # Windows
+                    font = ImageFont.truetype("arial.ttf", font_size)
+                except:
+                    try:
+                        # macOS
+                        font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", font_size)
+                    except:
+                        font = ImageFont.load_default()
+
+            # 3. Öğeleri (Widget) kabaca çiz
+            for it in self.items:
+                props = it.get('props', {})
+                x = int(props.get('x', 0))
+                y = int(props.get('y', 0))
+                type_ = it.get('type')
+                font_name = props.get('font', 'Arial')
+                
+                # Özel font yüklemeyi dene
+                item_font = font
+                if font_name.lower().endswith(".ttf"):
+                    try:
+                        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+                        font_path = os.path.join(project_root, "assets/fonts", font_name)
+                        if os.path.exists(font_path):
+                            fsize = int(props.get('font_size', 20)) if type_ == 'label' else 18
+                            item_font = ImageFont.truetype(font_path, fsize)
+                    except:
+                        item_font = font
+
+                if type_ == 'label':
+                    text = props.get('text', 'Label')
+                    color = props.get('color', '#FFFFFF')
+                    try:
+                        draw.text((x, y), text, fill=color, font=item_font)
+                    except:
+                        draw.rectangle([x, y, x+100, y+20], outline=color)
+                
+                elif type_ == 'button':
+                    text = props.get('text', 'Button')
+                    color = props.get('bg_color', '#365880') # bg_color kullan
+                    # Buton kutusu
+                    bw, bh = int(props.get('w', 220)), int(props.get('h', 60))
+                    draw.rectangle([x, y, x+bw, y+bh], fill=color, outline="white", width=2)
+                    try:
+                        # Metni ortala
+                        bbox = item_font.getbbox(text)
+                        tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
+                        tx = x + (bw - tw) // 2
+                        ty = y + (bh - th) // 2
+                        draw.text((tx, ty), text, fill="white", font=item_font)
+                    except:
+                        pass
+                
+                elif type_ == 'sprite':
+                    # Sprite için küçük bir kare
+                    draw.rectangle([x, y, x+60, y+60], outline="#cc7832", width=2)
+
+            # 4. Seviye Ekranı ise Özel Elemanları Çiz (Sepet, HUD vb.)
+            if (self.screen_type or "").lower() == "level":
+                # A. Sepet (Basket)
+                basket_val = self.level_basket_display_var.get()
+                if " — " in basket_val:
+                    try:
+                        # "Region Name — path/to/image.png" formatından yolu ayıkla
+                        b_path = basket_val.split(" — ")[1].strip()
+                        abs_b = self._abs_assets_path(b_path)
+                        if abs_b and os.path.isfile(abs_b):
+                            b_img = Image.open(abs_b).convert('RGBA')
+                            b_img.thumbnail((120, 120), Image.LANCZOS)
+                            # Ekranın altına yakın bir yere koy
+                            thumb.paste(b_img, (self.CANVAS_W//2 - 60, self.CANVAS_H - 120), b_img)
+                    except:
+                        draw.rectangle([self.CANVAS_W//2 - 50, self.CANVAS_H - 80, self.CANVAS_W//2 + 50, self.CANVAS_H - 40], fill="#cc7832")
+
+                # B. HUD
+                hud_val = self.level_hud_display_var.get()
+                if " — " in hud_val:
+                    try:
+                        h_path = hud_val.split(" — ")[1].strip()
+                        abs_h = self._abs_assets_path(h_path)
+                        if abs_h and os.path.isfile(abs_h):
+                            h_img = Image.open(abs_h).convert('RGBA')
+                            h_img.thumbnail((100, 100), Image.LANCZOS)
+                            thumb.paste(h_img, (20, 20), h_img)
+                    except: pass
+                
+                # C. Örnek Düşen Öğeler (Görsellik İçin)
+                for i in range(3):
+                    draw.ellipse([200 + i*200, 100 + i*50, 260 + i*200, 160 + i*50], outline="white", width=2)
+
+            # 5. Boyutu küçült (Örn: 320x240)
+            thumb.thumbnail((320, 240), Image.LANCZOS)
+            
+            # 5. Klasörü oluştur ve kaydet
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            preview_dir = os.path.join(project_root, "assets", "previews")
+            os.makedirs(preview_dir, exist_ok=True)
+            
+            save_path = os.path.join(preview_dir, f"screen_{self.game_id}_{self.screen_name}.png")
+            thumb.save(save_path)
+            print(f"[Designer] Thumbnail saved: {save_path}")
+            
+        except Exception as e:
+            print(f"[Designer] Thumbnail generation error: {e}")
 
     def _load_existing(self) -> None:
         """Varsa DB'den 'opening' ekranını okur ve kanvasa uygular."""
@@ -2088,10 +2449,24 @@ class ScreenDesignerWindow(tk.Toplevel):
                     cx, cy = int(self._to_canvas(lx)), int(self._to_canvas(ly))
                     text = w.get("text", "")
                     color = w.get("color", "#FFFFFF")
-                    size = int(((w.get("font") or {}).get("size") or 20))
-                    cid = self.canvas.create_text(cx, cy, text=text, fill=color, anchor=w.get("anchor", "nw"), font=("Segoe UI", size))
+                    font_info = w.get("font") or {}
+                    font_name = font_info.get("name", "Arial")
+                    size = int(font_info.get("size") or 20)
+                    
+                    cid = None
+                    photo = None
+                    if font_name.lower().endswith(".ttf"):
+                        photo = self._render_text_as_image(text, font_name, size, color)
+                        if photo:
+                            cid = self.canvas.create_image(cx, cy, anchor=w.get("anchor", "nw"), image=photo)
+                    
+                    if cid is None:
+                        cid = self.canvas.create_text(cx, cy, text=text, fill=color, anchor=w.get("anchor", "nw"), font=("Segoe UI", size))
+                    
                     name = (w.get("name") or (text.strip() if text.strip() else None)) or self._gen_name("label")
-                    self.items.append({"id": cid, "type": "label", "props": {"name": name, "text": text, "color": color, "font_size": size, "x": lx, "y": ly}})
+                    props = {"name": name, "text": text, "color": color, "font_size": size, "font": font_name, "x": lx, "y": ly}
+                    if photo: props["img_ref"] = photo
+                    self.items.append({"id": cid, "type": "label", "props": props})
                 elif w.get("type") == "button":
                     bx, by = float(w.get("x", 0)), float(w.get("y", 0))
                     txt = ((w.get("text_overlay") or {}).get("text") or "Buton")
@@ -2107,7 +2482,21 @@ class ScreenDesignerWindow(tk.Toplevel):
                         wth = float(frame.get("width", 180)); hgt = float(frame.get("height", 48))
                     cx, cy = int(self._to_canvas(bx)), int(self._to_canvas(by))
                     cw, ch = int(self._to_canvas(wth)), int(self._to_canvas(hgt))
-                    lbl = self.canvas.create_text(cx+cw/2, cy+ch/2, text=txt, fill="#FFFFFF", anchor="center", font=("Segoe UI", 18))
+                    
+                    text_overlay = w.get("text_overlay") or {}
+                    font_info = text_overlay.get("font") or {}
+                    font_name = font_info.get("name", "Arial")
+                    size = int(font_info.get("size") or 18)
+                    
+                    lbl = None
+                    lbl_photo = None
+                    if font_name.lower().endswith(".ttf"):
+                        lbl_photo = self._render_text_as_image(txt, font_name, size, "#FFFFFF")
+                        if lbl_photo:
+                            lbl = self.canvas.create_image(cx+cw/2, cy+ch/2, anchor="center", image=lbl_photo)
+                    
+                    if lbl is None:
+                        lbl = self.canvas.create_text(cx+cw/2, cy+ch/2, text=txt, fill="#FFFFFF", anchor="center", font=("Segoe UI", size))
                     # try render sprite image
                     img_id = None; pil_crop = None; photo = None
                     if sprite_info.get("image") and sprite_info.get("name"):
@@ -2125,10 +2514,12 @@ class ScreenDesignerWindow(tk.Toplevel):
                     if img_id is None:
                         # fallback to colored rect
                         rect = self.canvas.create_rectangle(cx, cy, cx+cw, cy+ch, fill=bgc, outline="")
-                        props = {"name": name, "text": txt, "action": action, "w": wth, "h": hgt, "x": bx, "y": by, "label_id": lbl, "bg_color": bgc}
+                        props = {"name": name, "text": txt, "action": action, "w": wth, "h": hgt, "x": bx, "y": by, "label_id": lbl, "bg_color": bgc, "font": font_name, "font_size": size}
+                        if lbl_photo: props["label_img_ref"] = lbl_photo
                         self.items.append({"id": rect, "type": "button", "props": props})
                     else:
-                        props = {"name": name, "text": txt, "action": action, "w": wth, "h": hgt, "x": bx, "y": by, "label_id": lbl, "bg_color": bgc, "sprite": sprite_info, "pil_crop": pil_crop, "img_ref": photo}
+                        props = {"name": name, "text": txt, "action": action, "w": wth, "h": hgt, "x": bx, "y": by, "label_id": lbl, "bg_color": bgc, "sprite": sprite_info, "pil_crop": pil_crop, "img_ref": photo, "font": font_name, "font_size": size}
+                        if lbl_photo: props["label_img_ref"] = lbl_photo
                         self.items.append({"id": img_id, "type": "button", "props": props})
                 elif w.get("type") == "image":
                     ix, iy = float(w.get("x", 0)), float(w.get("y", 0))
@@ -2159,23 +2550,34 @@ class ScreenDesignerWindow(tk.Toplevel):
                 self.canvas.tag_lower("__bg__")
             except Exception:
                 pass
+            self._run_linter()
         except Exception as e:
             messagebox.showwarning("Yükleme", f"Ekran yüklenemedi: {e}")
 
     def _reflow_items(self) -> None:
         """Zoom değiştiğinde tüm öğeleri yeniden boyutlandır/konumlandır."""
         for it in self.items:
+            x, y = it["props"].get("x", 0), it["props"].get("y", 0)
+            cx, cy = int(self._to_canvas(x)), int(self._to_canvas(y))
+            
             if it["type"] == "label":
-                x, y = it["props"].get("x", 0), it["props"].get("y", 0)
-                cx, cy = int(self._to_canvas(x)), int(self._to_canvas(y))
                 self.canvas.coords(it["id"], cx, cy)
+                if self.canvas.type(it["id"]) == "image":
+                     font_name = it["props"].get("font", "Arial")
+                     txt = it["props"].get("text", "")
+                     size = it["props"].get("font_size", 20)
+                     color = it["props"].get("color", "#FFFFFF")
+                     photo = self._render_text_as_image(txt, font_name, size, color)
+                     if photo:
+                          self.canvas.itemconfigure(it["id"], image=photo)
+                          it["props"]["img_ref"] = photo
             else:
-                x, y = it["props"].get("x", 0), it["props"].get("y", 0)
                 w = it["props"].get("w", 180)
                 h = it["props"].get("h", 48)
-                cx, cy, cw, ch = int(self._to_canvas(x)), int(self._to_canvas(y)), int(self._to_canvas(w)), int(self._to_canvas(h))
+                cw, ch = int(self._to_canvas(w)), int(self._to_canvas(h))
+                
                 if self.canvas.type(it["id"]) == 'image' and it["props"].get("pil_crop"):
-                    # Resize image by zoom and update
+                    # Resize sprite image by zoom and update
                     pil_crop = it["props"].get("pil_crop")
                     img_zoomed = pil_crop.resize((max(1,cw), max(1,ch)), Image.LANCZOS)
                     photo = ImageTk.PhotoImage(img_zoomed)
@@ -2184,9 +2586,19 @@ class ScreenDesignerWindow(tk.Toplevel):
                     self.canvas.coords(it["id"], cx, cy)
                 else:
                     self.canvas.coords(it["id"], cx, cy, cx+cw, cy+ch)
+                    
                 # Sadece butonlarda label merkezini güncelle
                 if it["type"] == "button" and "label_id" in it["props"]:
-                    self.canvas.coords(it["props"]["label_id"], cx+cw/2, cy+ch/2)
+                    lbl_id = it["props"]["label_id"]
+                    self.canvas.coords(lbl_id, cx+cw/2, cy+ch/2)
+                    # Re-render custom font if zoom changed
+                    font_name = it["props"].get("font", "Arial")
+                    if font_name.lower().endswith(".ttf"):
+                         txt = it["props"].get("text", "Buton")
+                         photo = self._render_text_as_image(txt, font_name, 18, "#FFFFFF")
+                         if photo:
+                              self.canvas.itemconfigure(lbl_id, image=photo)
+                              it["props"]["label_img_ref"] = photo
         try:
             self.canvas.tag_lower("__bg__")
         except Exception:
@@ -2605,11 +3017,47 @@ class ScreenDesignerWindow(tk.Toplevel):
             self.obj_tree.delete(str(it["id"]))
         except Exception:
             pass
+            
+        self._run_linter()
+        self._set_dirty(True)
         # clear selection and panels
         self.selected_item = None
         self.label_frame.pack_forget(); self.button_frame.pack_forget()
         try:
             self.canvas.tag_lower("__bg__")
+        except Exception:
+            pass
+
+    def _get_missing_essentials(self) -> List[str]:
+        """Ekran tipine göre eksik olan temel düğmeleri/bileşenleri belirler."""
+        missing = []
+        actions = [it["props"].get("action") for it in self.items if it["type"] == "button"]
+        name = (self.screen_name or "").lower()
+        
+        if name == "opening":
+            if "start_game" not in actions:
+                missing.append("Başlat düğmesi (Aksiyon: start_game)")
+        elif "info" in name:
+            if not any(a in actions for a in ["continue_level", "start_game", "next_level", "back"]):
+                missing.append("Devam et veya Geri düğmesi")
+        elif "victory" in name or "win" in name:
+            if not any(a in actions for a in ["back", "next_level", "restart_game", "start_game"]):
+                missing.append("Menüye Dön veya Sonraki Seviye düğmesi")
+        elif "defeat" in name or "lose" in name or "game_over" in name:
+            if not any(a in actions for a in ["back", "restart_game", "start_game"]):
+                missing.append("Menüye Dön veya Yeniden Başlat düğmesi")
+                
+        return missing
+
+    def _run_linter(self):
+        """Linter'ı çalıştırır ve sağ paneldeki uyarı etiketini günceller."""
+        try:
+            missing = self._get_missing_essentials()
+            if not missing:
+                self.linter_label.config(text="✅ Tüm temel bileşenler mevcut.", foreground="#4CAF50")
+            else:
+                txt = "⚠️ Eksik önerilen öğeler:\n" + "\n".join([f"• {m}" for m in missing])
+                self.linter_label.config(text=txt, foreground="#FF9800")
         except Exception:
             pass
 

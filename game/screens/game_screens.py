@@ -1,7 +1,7 @@
 import pygame
 import json
 from settings import *
-from ..core.utils import draw_text, get_resource_path
+from ..core.utils import draw_text, get_resource_path, draw_spline
 import random
 import math
 import sqlite3
@@ -300,6 +300,10 @@ class Carousel:
         self.card_rects = []
         # Last selected rect (for external layout binding)
         self.selected_rect: pygame.Rect | None = None
+        
+        # Animation state for sub-levels
+        self.anim_progress = 1.0
+        self.prev_selected_index = -1
 
     def _create_cards(self) -> list[pygame.Surface]:
         """Create surfaces (cards) for each game with vibrant backgrounds."""
@@ -341,17 +345,20 @@ class Carousel:
 
     def get_current_selected_rect(self) -> pygame.Rect:
         """Calculates the rect of the selected card based on current_x without drawing."""
-        # Seçili kartın merkezi self.current_x'tir
-        center_x = self.current_x
+        return self.get_card_rect(self.selected_index)
+
+    def get_card_rect(self, index: int) -> pygame.Rect:
+        """Calculates the rect for a given card index based on current_x."""
+        # Kartın merkezi current_x ve offset'e göre hesaplanır
+        offset = (index - self.selected_index) * self.card_spacing + (self.current_x - SCREEN_WIDTH / 2)
+        center_x = SCREEN_WIDTH / 2 + offset
         
-        # Ölçek hesabı (draw metoduyla aynı mantık)
         dist = abs(center_x - SCREEN_WIDTH / 2)
         scale = max(0.5, 1.0 - (dist / (SCREEN_WIDTH * 0.75)) * 0.5)
         
         w = int(self.card_w * scale)
         h = int(self.card_h * scale)
         
-        # Kartın dikey konumu (daha aşağı alındı)
         cy = int(SCREEN_HEIGHT * 0.6)
         rect = pygame.Rect(0, 0, w, h)
         rect.center = (center_x, cy)
@@ -365,6 +372,10 @@ class Carousel:
             self.current_x = self.target_x
         else:
             self.current_x += diff * self.anim_speed
+            
+        # Alt bölüm (tree) animasyonu
+        if self.anim_progress < 1.0:
+            self.anim_progress = min(1.0, self.anim_progress + 0.04)
 
     def draw(self, surface: pygame.Surface):
         """Draw the carousel on the given surface."""
@@ -418,6 +429,7 @@ class Carousel:
         if event.type == pygame.KEYDOWN:
             if current_time - self.last_key_press_time > self.key_cooldown:
                 moved = False
+                old_index = self.selected_index
                 if event.key == pygame.K_RIGHT and self.selected_index < len(self.games) - 1:
                     self.selected_index += 1
                     moved = True
@@ -426,6 +438,8 @@ class Carousel:
                     moved = True
                 
                 if moved:
+                    self.prev_selected_index = old_index
+                    self.anim_progress = 0.0
                     self.target_x = (SCREEN_WIDTH / 2) - (self.selected_index * self.card_spacing)
                     self.last_key_press_time = current_time
 
@@ -436,6 +450,7 @@ class Carousel:
         if event.type == pygame.MOUSEWHEEL:
             if current_time - self.last_key_press_time > self.key_cooldown:
                 moved = False
+                old_index = self.selected_index
                 if event.y < 0 and self.selected_index < len(self.games) - 1: # Scroll down/right
                     self.selected_index += 1
                     moved = True
@@ -444,6 +459,8 @@ class Carousel:
                     moved = True
                 
                 if moved:
+                    self.prev_selected_index = old_index
+                    self.anim_progress = 0.0
                     self.target_x = (SCREEN_WIDTH / 2) - (self.selected_index * self.card_spacing)
                     self.last_key_press_time = current_time
 
@@ -459,8 +476,13 @@ class Carousel:
                 # Snap to the nearest card
                 offset = self.current_x - (SCREEN_WIDTH / 2)
                 # Daha kararlı bir yuvarlama için
-                idx = round(-offset / self.card_spacing)
-                self.selected_index = max(0, min(len(self.games) - 1, int(idx)))
+                new_idx = round(-offset / self.card_spacing)
+                new_idx = max(0, min(len(self.games) - 1, int(new_idx)))
+                
+                if new_idx != self.selected_index:
+                    self.prev_selected_index = self.selected_index
+                    self.selected_index = new_idx
+                    self.anim_progress = 0.0
                 
                 # Hedef konumu kesin olarak ayarla
                 self.target_x = (SCREEN_WIDTH / 2) - (self.selected_index * self.card_spacing)
@@ -480,84 +502,92 @@ class Carousel:
 
         return None
 
-def _draw_level_tree(screen, center_rect: pygame.Rect, levels: list):
-    """Draws levels branching out vertically (up/down) from the center card."""
-    if not levels:
+def _draw_level_tree(screen, center_rect: pygame.Rect, levels: list, progress: float):
+    """Draws levels branching out vertically using aesthetic spline curves."""
+    if not levels or progress <= 0:
         return
 
     center_x, center_y = center_rect.center
     
-    # Dalların uzunluğu (kısaltıldı)
-    radius = 110
+    # Dalların uzunluğu
+    radius = 130
     
-    # Font (küçültüldü)
-    font = pygame.font.Font(None, 22)
+    # Font
+    font = pygame.font.Font(None, 24)
+
+    # Create a dedicated surface for the tree to handle alpha smoothly
+    tree_surf = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
 
     # Gruplama: Çiftler yukarı, Tekler aşağı
     upper_levels = levels[0::2]
     lower_levels = levels[1::2]
     
-    def draw_branch(level, angle_deg):
-        # Açı: 0 sağ, -90 yukarı, 90 aşağı
+    def draw_branch(surf, level, angle_deg, p):
         rad = math.radians(angle_deg)
-        
-        # Merkezden başla
         start_pos = (center_x, center_y)
         
         end_x = center_x + radius * math.cos(rad)
         end_y = center_y + radius * math.sin(rad)
         end_pos = (end_x, end_y)
         
-        line_color = (200, 200, 255, 180)
-        pygame.draw.line(screen, line_color, start_pos, end_pos, 3)
+        # Spline Rengi
+        alpha = int(255 * p)
+        line_color = (200, 200, 255, alpha)
+        glow_color = (150, 150, 255, int(alpha * 0.4))
+        
+        # Glow (daha geniş, daha şeffaf spline)
+        draw_spline(surf, start_pos, end_pos, p, glow_color, 7)
+        # Ana Spline
+        tip_pos = draw_spline(surf, start_pos, end_pos, p, line_color, 3)
         
         # Uç nokta
-        pygame.draw.circle(screen, CARD_SELECTED_COLOR, (int(end_x), int(end_y)), 6)
-        pygame.draw.circle(screen, WHITE, (int(end_x), int(end_y)), 3)
-        
-        # Metin
-        level_name = level.get('level_name', str(level.get('level_number')))
-        text_surf = font.render(level_name, True, TEXT_COLOR)
-        
-        # Metni dalın ucuna, biraz öteye koy
-        t_offset = 18
-        tx = end_x + t_offset * math.cos(rad)
-        ty = end_y + t_offset * math.sin(rad)
-        text_rect = text_surf.get_rect(center=(tx, ty))
-        
-        # Arkaplan kutusu (yarı saydam)
-        bg_rect = text_rect.inflate(8, 4)
-        s = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        s.fill((20, 20, 40, 200)) # Koyu yarı saydam
-        screen.blit(s, bg_rect.topleft)
-        screen.blit(text_surf, text_rect)
+        if p > 0.7:
+            node_p = (p - 0.7) / 0.3
+            node_alpha = int(255 * node_p)
+            
+            # Pulse efekti (zaman bazlı)
+            pulse = (math.sin(pygame.time.get_ticks() * 0.005) + 1) * 0.5
+            pulse_radius = 6 + pulse * 4
+            
+            # Dış ışıma
+            pygame.draw.circle(surf, (100, 100, 255, int(50 * node_p)), (int(tip_pos[0]), int(tip_pos[1])), int(pulse_radius + 4))
+            # Ana düğüm
+            pygame.draw.circle(surf, (*CARD_SELECTED_COLOR, node_alpha), (int(tip_pos[0]), int(tip_pos[1])), 6)
+            pygame.draw.circle(surf, (255, 255, 255, node_alpha), (int(tip_pos[0]), int(tip_pos[1])), 3)
+            
+            # Metin
+            level_name = level.get('level_name', str(level.get('level_number')))
+            text_surf = font.render(level_name, True, TEXT_COLOR)
+            text_surf.set_alpha(node_alpha)
+            
+            t_offset = 28
+            tx = tip_pos[0] + t_offset * math.cos(rad)
+            ty = tip_pos[1] + t_offset * math.sin(rad)
+            text_rect = text_surf.get_rect(center=(tx, ty))
+            
+            bg_rect = text_rect.inflate(14, 8)
+            # Metin arkaplanı (yuvarlatılmış)
+            bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(bg_surf, (20, 20, 40, int(200 * node_p)), bg_surf.get_rect(), border_radius=6)
+            surf.blit(bg_surf, bg_rect.topleft)
+            surf.blit(text_surf, text_rect)
 
-    # Yukarıdakileri dağıt (-130 ile -50 arası)
+    # Yukarıdakiler
     if upper_levels:
         count = len(upper_levels)
-        if count == 1:
-            angles = [-90]
-        else:
-            min_a, max_a = -130, -50
-            step = (max_a - min_a) / (count - 1)
-            angles = [min_a + i * step for i in range(count)]
-            
+        angles = [-90] if count == 1 else [(-140 + i * (100 / (count - 1))) for i in range(count)]
         for i, lvl in enumerate(upper_levels):
-            draw_branch(lvl, angles[i])
+            draw_branch(tree_surf, lvl, angles[i], progress)
 
-    # Aşağıdakileri dağıt (50 ile 130 arası)
+    # Aşağıdakiler
     if lower_levels:
         count = len(lower_levels)
-        if count == 1:
-            angles = [90]
-        else:
-            min_a, max_a = 50, 130
-            step = (max_a - min_a) / (count - 1)
-            angles = [min_a + i * step for i in range(count)]
-            
+        angles = [90] if count == 1 else [(40 + i * (100 / (count - 1))) for i in range(count)]
         for i, lvl in enumerate(lower_levels):
-            draw_branch(lvl, angles[i])
+            draw_branch(tree_surf, lvl, angles[i], progress)
 
+    # Ağacı ana ekrana bas
+    screen.blit(tree_surf, (0, 0))
 
 def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
     """Draws the game selection carousel and handles the 'no games' state."""
@@ -570,14 +600,21 @@ def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
         
         carousel.update()
 
-        # Önce seçili kartın pozisyonunu tahmin et ve ağacı arkaya çiz
+        # Önce ağaçları arkaya çiz
         try:
+            # 1. Eski (kaybolan) oyunun ağacı
+            if carousel.anim_progress < 1.0 and carousel.prev_selected_index != -1:
+                prev_game = carousel.games[carousel.prev_selected_index]
+                prev_rect = carousel.get_card_rect(carousel.prev_selected_index)
+                prev_levels = Database().get_levels(getattr(prev_game, 'id', 0))
+                _draw_level_tree(screen, prev_rect, prev_levels, 1.0 - carousel.anim_progress)
+
+            # 2. Yeni (aktif) oyunun ağacı
             selected_game = carousel.games[carousel.selected_index] if carousel.games else None
             if selected_game:
-                # Çizim yapmadan rect'i hesapla
                 sel_rect = carousel.get_current_selected_rect()
                 levels = Database().get_levels(getattr(selected_game, 'id', 0))
-                _draw_level_tree(screen, sel_rect, levels)
+                _draw_level_tree(screen, sel_rect, levels, carousel.anim_progress)
         except Exception as e:
             print(f"Tree draw error: {e}")
             pass

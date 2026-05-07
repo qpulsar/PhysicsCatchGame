@@ -1,0 +1,45 @@
+{
+  "id": "space_catch",
+  "name": "Uzay Görevi",
+  "description": "Derin uzayda, kayıp enerji kristallerini UFO'nuzla toplayın. Çok hızlı ve zorlu!",
+  "settings": {
+    "total_levels": "3",
+    "default_wrong_percentage": "40",
+    "default_item_speed": "4.5",
+    "default_max_items": "8",
+    "music_path": "assets/audio/math_bg.mp3",
+    "catch_sound_path": "assets/audio/catch_math.mp3",
+    "miss_sound_path": "assets/audio/miss.mp3"
+  },
+  "screens": [
+    {
+      "name": "opening",
+      "type": "opening",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"UZAY GÖREVİ\", \"x\": 400, \"y\": 150, \"color\": \"#00FFFF\", \"size\": 72, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Enerji Kristallerini Kurtar!\", \"x\": 400, \"y\": 240, \"color\": \"#FFFFFF\", \"size\": 28, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"HİPERUZAYA GEÇ\", \"x\": 400, \"y\": 420, \"action\": \"start_game\", \"color\": \"#9C27B0\", \"font\": \"Arial\", \"font_size\": 32, \"border_radius\": 20}]}"
+    },
+    {
+      "name": "game_over",
+      "type": "game_over",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"GÖREV BAŞARISIZ\", \"x\": 400, \"y\": 200, \"color\": \"#00FFFF\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"ÜSSE DÖN\", \"x\": 400, \"y\": 420, \"action\": \"back_to_menu\", \"color\": \"#E91E63\", \"font\": \"Arial\", \"font_size\": 26}]}"
+    }
+  ],
+  "levels": [
+    {
+      "number": 1,
+      "name": "Asteroit Kuşağı",
+      "description": "Hızla gelen kristalleri yakalayın.",
+      "settings": {
+        "wrong_answer_percentage": 35,
+        "item_speed": 4.0,
+        "max_items_on_screen": 6
+      },
+      "expressions": [
+        {"text": "Foton", "correct": true},
+        {"text": "Elektron", "correct": true},
+        {"text": "Nötron", "correct": true},
+        {"text": "Taş", "correct": false},
+        {"text": "Toz", "correct": false}
+      ]
+    }
+  ]
+}

@@ -18,6 +18,8 @@ from .models import (
     EffectSheetRegion,
 )
 from ..database.database import DatabaseManager
+import json
+from pathlib import Path
 
 
 class GameService:
@@ -27,13 +29,13 @@ class GameService:
         """Initialize with a database manager."""
         self.db = db_manager
     
-    def create_game(self, name: str, description: str = "") -> Game:
+    def create_game(self, name: str, description: str = "", is_template: bool = False) -> Game:
         """Create a new game and return the Game object."""
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO games (name, description, created_at, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
-                (name, description)
+                'INSERT INTO games (name, description, is_template, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+                (name, description, 1 if is_template else 0)
             )
             conn.commit()
             game_id = cursor.lastrowid
@@ -97,6 +99,39 @@ class GameService:
     def update_setting(self, game_id: int, key: str, value: str) -> None:
         """Update a single game setting key/value."""
         self.db.set_setting(game_id, key, value)
+
+    def create_game_from_template(self, name: str, description: str, template_data: Dict[str, Any], is_template: bool = False) -> Game:
+        """Create a new game based on a template."""
+        # 1. Create the game
+        game = self.create_game(name, description, is_template=is_template)
+        
+        # 2. Apply settings
+        template_settings = template_data.get("settings", {})
+        for key, value in template_settings.items():
+            self.update_setting(game.id, key, value)
+            
+        # 3. Add screens
+        template_screens = template_data.get("screens", [])
+        for s in template_screens:
+            self.db.upsert_screen(game.id, s["name"], s["type"], s["data_json"])
+            
+        # 4. Add levels and expressions
+        template_levels = template_data.get("levels", [])
+        for lvl in template_levels:
+            lvl_id = self.db.add_level({
+                "game_id": game.id,
+                "level_number": lvl["number"],
+                "level_name": lvl["name"],
+                "level_description": lvl.get("description", ""),
+                "wrong_answer_percentage": lvl.get("settings", {}).get("wrong_answer_percentage", 20),
+                "item_speed": lvl.get("settings", {}).get("item_speed", 2.0),
+                "max_items_on_screen": lvl.get("settings", {}).get("max_items_on_screen", 5)
+            })
+            
+            for expr in lvl.get("expressions", []):
+                self.db.add_expression(lvl_id, expr["text"], expr["correct"])
+                
+        return game
 
 
 class ScreenService:
@@ -625,3 +660,108 @@ class SpriteService:
             pass
         # already relative
         return p
+
+
+class TemplateService:
+    """Service for managing game templates."""
+
+    def __init__(self):
+        self.templates_dir = Path(__file__).parent.parent / "templates"
+        self.templates_dir.mkdir(parents=True, exist_ok=True)
+
+    def list_templates(self) -> List[Dict[str, str]]:
+        """List available templates."""
+        templates = []
+        # Add a "Blank" template option
+        templates.append({"id": "blank", "name": "Boş Oyun", "description": "Herhangi bir ön ayar içermeyen boş oyun."})
+        
+        for f in self.templates_dir.glob("*.json"):
+            try:
+                with open(f, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+                    templates.append({
+                        "id": data.get("id", f.stem),
+                        "name": data.get("name", f.stem),
+                        "description": data.get("description", ""),
+                        "path": str(f)
+                    })
+            except Exception:
+                continue
+        return templates
+
+    def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
+        """Load a specific template by ID."""
+        if template_id == "blank":
+            return None
+            
+        for f in self.templates_dir.glob("*.json"):
+            try:
+                with open(f, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+                    if data.get("id") == template_id or f.stem == template_id:
+                        return data
+            except Exception:
+                continue
+        return None
+
+    def export_game_to_template(self, game_id: int, template_id: str, db_manager: DatabaseManager) -> bool:
+        """Export a game's data to a template JSON file."""
+        try:
+            # 1. Get Game Info
+            game_row = db_manager.get_game(game_id)
+            if not game_row:
+                return False
+                
+            # 2. Get Settings
+            settings = db_manager.get_settings(game_id)
+            
+            # 3. Get Screens
+            screens = db_manager.get_screens(game_id)
+            screens_data = []
+            for s in screens:
+                screens_data.append({
+                    "name": s["name"],
+                    "type": s["type"],
+                    "data_json": s["data_json"]
+                })
+                
+            # 4. Get Levels and Expressions
+            levels = db_manager.get_levels(game_id)
+            levels_data = []
+            for lvl in levels:
+                lvl_id = lvl["id"]
+                exprs = db_manager.get_expressions(lvl_id)
+                lvl_settings = {
+                    "wrong_answer_percentage": lvl["wrong_answer_percentage"],
+                    "item_speed": lvl["item_speed"],
+                    "max_items_on_screen": lvl["max_items_on_screen"]
+                }
+                expressions_data = [{"text": e["expression"], "correct": bool(e["is_correct"])} for e in exprs]
+                
+                levels_data.append({
+                    "number": lvl["level_number"],
+                    "name": lvl["level_name"],
+                    "description": lvl["level_description"],
+                    "settings": lvl_settings,
+                    "expressions": expressions_data
+                })
+                
+            # Build final JSON
+            template_data = {
+                "id": template_id,
+                "name": game_row["name"],
+                "description": game_row["description"],
+                "settings": settings,
+                "screens": screens_data,
+                "levels": levels_data
+            }
+            
+            # Write to file
+            file_path = self.templates_dir / f"{template_id}.json"
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(template_data, f, indent=2, ensure_ascii=False)
+                
+            return True
+        except Exception as e:
+            print(f"Error exporting template: {e}")
+            return False

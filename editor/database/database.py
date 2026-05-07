@@ -52,6 +52,7 @@ class DatabaseManager:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             description TEXT,
+            is_template INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
@@ -76,6 +77,7 @@ class DatabaseManager:
 
         # Ensure new effect-related columns exist on levels (idempotent migration)
         self._ensure_levels_effect_columns(cursor)
+        self._ensure_games_template_column(cursor)
         
         # Create expressions table
         cursor.execute('''
@@ -601,3 +603,16 @@ class DatabaseManager:
             cursor.execute('DELETE FROM effects WHERE name = ?', (name,))
             conn.commit()
             return cursor.rowcount > 0
+    def _ensure_games_template_column(self, cursor: sqlite3.Cursor) -> None:
+        """Add is_template column to games table if it doesn't exist."""
+        cursor.execute("PRAGMA table_info(games)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'is_template' not in columns:
+            cursor.execute('ALTER TABLE games ADD COLUMN is_template INTEGER DEFAULT 0')
+
+    def set_game_as_template(self, game_id: int, is_template: bool) -> None:
+        """Mark a game as a template."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE games SET is_template = ? WHERE id = ?', (1 if is_template else 0, game_id))
+            conn.commit()

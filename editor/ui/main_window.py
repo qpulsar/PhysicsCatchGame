@@ -9,7 +9,7 @@ import subprocess
 from PIL import Image, ImageTk
 
 from ..core.models import Game
-from ..core.services import GameService, LevelService, ExpressionService, SpriteService, ScreenService, EffectService
+from ..core.services import GameService, LevelService, ExpressionService, SpriteService, ScreenService, EffectService, TemplateService
 from ..database.database import DatabaseManager
 from .tabs.levels_tab import LevelsTab
 from .tabs.settings_tab import SettingsTab
@@ -17,7 +17,8 @@ from .tabs.sprites_tab import SpritesTab
 from .tabs.media_tab import MediaTab
 from .tabs.screens_tab import ScreensTab
 from .tabs.arduino_tab import ArduinoTab
-from .game_dialog import GameDialog
+from .game_dialog import GameDialog, TemplateSelectorDialog
+from .publisher_dialog import SubmissionDialog
 from .screen_designer import ScreenDesignerWindow
 from .media_manager import MediaManagerWindow
 from .effects_manager import EffectsManagerWindow
@@ -26,13 +27,14 @@ from .sprites_manager import SpritesManagerWindow
 
 class GamesListFrame(ttk.Frame):
     """Frame for listing games and providing management buttons."""
-    def __init__(self, parent, game_service: GameService, on_game_select, on_add, on_edit, on_delete):
+    def __init__(self, parent, game_service: GameService, on_game_select, on_add, on_edit, on_delete, **kwargs):
         super().__init__(parent)
         self.game_service = game_service
         self.on_game_select = on_game_select
         self.on_add = on_add
         self.on_edit = on_edit
         self.on_delete = on_delete
+        self.on_template_toggle = kwargs.get('on_template_toggle')
 
         # --- Layout ---
         self.rowconfigure(1, weight=1)
@@ -59,14 +61,32 @@ class GamesListFrame(ttk.Frame):
         self.delete_button = ttk.Button(button_frame, text="Sil", command=self._on_delete, state="disabled")
         self.delete_button.pack(side=tk.LEFT, padx=2)
         
+        # Template visibility toggle
+        self.show_templates_var = tk.BooleanVar(value=False)
+        self.template_check = ttk.Checkbutton(self, text="Şablonları Göster", variable=self.show_templates_var, command=self._on_template_toggle)
+        self.template_check.grid(row=3, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+
+    def _on_template_toggle(self):
+        if self.on_template_toggle:
+            self.on_template_toggle()
+        self.refresh_games()
+        
     def refresh_games(self, select_id: Optional[int] = None):
         """Refreshes the list of games in the treeview."""
         for item in self.games_tree.get_children():
             self.games_tree.delete(item)
         
+        show_templates = getattr(self, 'show_templates_var', None)
+        show_templates = show_templates.get() if show_templates else False
+        
         self.games = self.game_service.get_games()
         for game in self.games:
-            self.games_tree.insert("", tk.END, iid=str(game.id), values=(game.name,))
+            # Filter out templates if checkbox is not selected
+            if game.is_template and not show_templates:
+                continue
+                
+            display_name = f"[ŞABLON] {game.name}" if game.is_template else game.name
+            self.games_tree.insert("", tk.END, iid=str(game.id), values=(display_name,))
         
         if select_id and self.games_tree.exists(str(select_id)):
             self.games_tree.selection_set(str(select_id))
@@ -130,9 +150,12 @@ class DashboardFrame(ttk.Frame):
         # --- Widgets ---
         self.title_label = ttk.Label(self, text="Lütfen bir oyun seçin.", style="Header.TLabel")
         self.title_label.grid(row=0, column=0, sticky="w", padx=10, pady=5)
-        # "Ekranlar" sekmesine hızlı erişim sağlayan buton
-     #   self.design_button = ttk.Button(self, text="Ekranlar", command=self._select_screens_tab, state="disabled")
-     #   self.design_button.grid(row=0, column=1, sticky="e", padx=10, pady=5)
+        
+        self.template_save_btn = ttk.Button(self, text="Şablon Dosyasını Güncelle 💾", command=self._export_template, style="Accent.TButton")
+        self.template_save_btn.grid(row=0, column=1, sticky="e", padx=5, pady=5)
+        
+        self.submit_game_btn = ttk.Button(self, text="Oyunu İncelemeye Gönder 🚀", command=self._submit_game, style="Accent.TButton")
+        self.submit_game_btn.grid(row=0, column=2, sticky="e", padx=10, pady=5)
         
         # Notebook for game management
         self.notebook = ttk.Notebook(self)
@@ -153,9 +176,18 @@ class DashboardFrame(ttk.Frame):
     def update_view(self):
         """Updates the dashboard with the current game's data."""
         if self.current_game:
-            self.title_label.config(text=self.current_game.name)
+            display_name = f"Şablon: {self.current_game.name}" if self.current_game.is_template else self.current_game.name
+            self.title_label.config(text=display_name)
             self.desc_label.config(text=self.current_game.description or "Açıklama yok.")
-            #self.design_button.config(state="normal")
+            
+            if self.current_game.is_template:
+                self.template_save_btn.grid(row=0, column=1, sticky="e", padx=5, pady=5)
+                self.submit_game_btn.grid_forget()
+            else:
+                self.template_save_btn.grid_forget()
+                self.submit_game_btn.grid(row=0, column=1, sticky="e", padx=10, pady=5)
+            
+            self.submit_game_btn.config(state="normal")
             
             settings = self.game_service.get_settings(self.current_game.id)
             settings_text = "\n".join([f"{k}: {v}" for k, v in settings.settings.items()])
@@ -175,6 +207,7 @@ class DashboardFrame(ttk.Frame):
             self.settings_text.config(state="normal")
             self.settings_text.delete("1.0", tk.END)
             self.settings_text.config(state="disabled")
+            self.submit_game_btn.config(state="disabled")
             #self.design_button.config(state="disabled")
 
             # Disable tabs if no game is selected
@@ -187,8 +220,10 @@ class DashboardFrame(ttk.Frame):
         frame.columnconfigure(0, weight=1)
         
         ttk.Label(frame, text="Açıklama", style="Subheader.TLabel").grid(row=0, column=0, sticky="w")
-        self.desc_label = ttk.Label(frame, text="", wraplength=800, justify="left")
+        self.desc_label = ttk.Label(frame, text="", justify="left")
         self.desc_label.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        # Bind to resize to update wraplength dynamically
+        frame.bind("<Configure>", lambda e: self.desc_label.configure(wraplength=e.width-20))
 
         ttk.Label(frame, text="Varsayılan Ayarlar", style="Subheader.TLabel").grid(row=2, column=0, sticky="w")
         self.settings_text = tk.Text(frame, height=8, width=40, wrap="word", state="disabled", relief="flat",
@@ -201,21 +236,30 @@ class DashboardFrame(ttk.Frame):
         self.gallery_frame.grid(row=5, column=0, sticky="nsew")
         frame.rowconfigure(5, weight=1)
         
-        self.gallery_canvas = tk.Canvas(self.gallery_frame, height=300, background="#2b2b2b", highlightthickness=0)
+        self.gallery_canvas = tk.Canvas(self.gallery_frame, background="#2b2b2b", highlightthickness=0)
         self.gallery_scrollbar = ttk.Scrollbar(self.gallery_frame, orient="vertical", command=self.gallery_canvas.yview)
         self.gallery_inner = ttk.Frame(self.gallery_canvas, style="TFrame")
         self.gallery_inner.bind(
             "<Configure>",
             lambda e: self.gallery_canvas.configure(scrollregion=self.gallery_canvas.bbox("all"))
         )
-        self.gallery_canvas.create_window((0,0), window=self.gallery_inner, anchor="nw")
+        self.gallery_window_id = self.gallery_canvas.create_window((0,0), window=self.gallery_inner, anchor="nw")
         self.gallery_canvas.configure(yscrollcommand=self.gallery_scrollbar.set)
+        
+        # Bind canvas resize to inner frame width
+        self.gallery_canvas.bind("<Configure>", self._on_gallery_canvas_configure)
+        
         self.gallery_canvas.grid(row=0, column=0, sticky="nsew")
         self.gallery_scrollbar.grid(row=0, column=1, sticky="ns")
         self.gallery_frame.columnconfigure(0, weight=1)
+        self.gallery_frame.rowconfigure(0, weight=1)
         self._gallery_images = []
         
         return frame
+
+    def _on_gallery_canvas_configure(self, event):
+        """Update the width of the inner frame to match the canvas width."""
+        self.gallery_canvas.itemconfig(self.gallery_window_id, width=event.width)
 
     def _select_screens_tab(self):
         """"Ekranlar" sekmesine geçiş yapar (varsa)."""
@@ -227,6 +271,12 @@ class DashboardFrame(ttk.Frame):
                     return
         except Exception:
             pass
+
+    def _submit_game(self):
+        """Opens the submission dialog for the current game."""
+        if not self.current_game:
+            return
+        SubmissionDialog(self, self.current_game.id, self.game_service.db)
         
     def _update_tabs(self):
         """Creates or refreshes the management tabs."""
@@ -237,7 +287,7 @@ class DashboardFrame(ttk.Frame):
         # Remove old tabs (except summary)
         while self.notebook.index("end") > 1:
             self.notebook.forget(1)
-        
+            
         if self.current_game:
             # Levels tab
             try:
@@ -245,8 +295,6 @@ class DashboardFrame(ttk.Frame):
                 self.notebook.add(self.tabs['levels'].frame, text="Seviyeler")
             except Exception as e:
                 messagebox.showerror("Sekme Hatası", f"Seviyeler sekmesi yüklenemedi: {e}")
-
-            # Sprite ve Medya yönetimi ayrı pencerelere taşındı (navbar düğmeleriyle açılır)
 
             # Settings tab
             try:
@@ -270,6 +318,30 @@ class DashboardFrame(ttk.Frame):
                 messagebox.showerror("Sekme Hatası", f"Arduino sekmesi yüklenemedi: {e}")
             
             self.refresh_tabs()
+
+    def _export_template(self):
+        """Exports the current template game back to its JSON file."""
+        if not self.current_game or not self.current_game.is_template:
+            return
+            
+        # Extract template ID from game name or description? 
+        # Better: We need to know which file it came from.
+        # Let's assume template_id is stored in a setting or just use the name slugified.
+        settings = self.game_service.get_settings(self.current_game.id)
+        template_id = settings.get("template_id")
+        
+        if not template_id:
+            messagebox.showerror("Hata", "Şablon ID'si bulunamadı. Bu oyun şablon olarak dışa aktarılamaz.")
+            return
+            
+        if messagebox.askyesno("Onay", f"'{template_id}.json' dosyasını mevcut verilerle güncellemek istiyor musunuz?"):
+            from ..core.services import TemplateService
+            ts = TemplateService()
+            success = ts.export_game_to_template(self.current_game.id, template_id, self.game_service.db)
+            if success:
+                messagebox.showinfo("Başarılı", f"'{template_id}.json' başarıyla güncellendi.")
+            else:
+                messagebox.showerror("Hata", "Şablon güncellenirken bir hata oluştu.")
 
     def refresh_tabs(self):
         """Calls the refresh method on all available tabs."""
@@ -529,30 +601,146 @@ class DashboardFrame(ttk.Frame):
         return os.path.join(self._project_root, maybe_rel)
 
     def _delete_media_item(self, item: Dict[str, Any]):
+        """Deletes a media item, warning the user if it's used in the game."""
+        if not self.current_game:
+            return
+
+        game_id = self.current_game.id
+        path = item.get('path')
+        type_ = item.get('type')
+        key = item.get('key')
+        
+        usage_locations = []
+        
+        # --- 1. Kullanım Kontrolü ---
+        
+        # A. Ayarlardaki Kullanım
+        settings = self.game_service.get_settings(game_id)
+        for s_key, s_val in settings.settings.items():
+            if s_val == path:
+                usage_locations.append(f"Ayarlar: {s_key}")
+        
+        # B. Ekranlardaki Kullanım (Arkaplan, Müzik, Widget)
         try:
-            if item.get('type') == 'sprite':
-                sprite_id = item.get('sprite_id')
-                self.sprite_service.delete_sprite_sheet(sprite_id)
-                abs_p = self._abs_path(item.get('path'))
-                if abs_p and os.path.isfile(abs_p):
-                    try:
-                        os.remove(abs_p)
-                    except Exception:
-                        pass
-            elif item.get('type') == 'setting':
-                key = item.get('key')
-                self.game_service.update_setting(self.current_game.id, key, '')
-                abs_p = self._abs_path(item.get('path'))
-                if abs_p and os.path.isfile(abs_p):
-                    try:
-                        os.remove(abs_p)
-                    except Exception:
-                        pass
-            else:
-                return
-            messagebox.showinfo("Başarılı", "Medya silindi.")
+            screens = self.screen_service.list_screens(game_id)
+            for sc in screens:
+                if not sc.data_json: continue
+                data = json.loads(sc.data_json)
+                
+                # Arkaplan
+                if (data.get('background') or {}).get('image') == path:
+                    usage_locations.append(f"Ekran Arkaplanı: {sc.name}")
+                
+                # Müzik
+                if data.get('music') == path:
+                    usage_locations.append(f"Ekran Müziği: {sc.name}")
+                
+                # Widgetlar
+                widgets = data.get('widgets') or []
+                for idx, w in enumerate(widgets):
+                    if not isinstance(w, dict): continue
+                    if (w.get('sprite') or {}).get('image') == path:
+                        usage_locations.append(f"Ekran Widget: {sc.name} (Nesne #{idx+1})")
         except Exception as e:
-            messagebox.showerror("Hata", f"Medya silinirken hata: {e}")
+            print(f"Usage check error (screens): {e}")
+
+        # C. Sprite Olarak Seviyelerdeki Kullanım
+        sprite_id = None
+        if type_ == 'sprite' or (path and 'assets/sprites' in path):
+            # Sprite ID'sini bul
+            if key and key.startswith('sprite_'):
+                try: sprite_id = int(key.split('_')[1])
+                except: pass
+            
+            if not sprite_id and path:
+                all_sprites = self.sprite_service.get_sprite_sheets()
+                for s in all_sprites:
+                    if s.path == path:
+                        sprite_id = s.id
+                        break
+            
+            if sprite_id:
+                try:
+                    defs = self.sprite_service.get_all_definitions_for_sheet(sprite_id)
+                    for d in defs:
+                        expr = self.expression_service._get_expression(d.expression_id)
+                        if expr:
+                            lvl = self.level_service.get_level(expr.level_id)
+                            usage_locations.append(f"Seviye {lvl.level_number if lvl else '?'}: {expr.expression}")
+                except Exception as e:
+                    print(f"Usage check error (sprites): {e}")
+
+        # --- 2. Kullanıcı Onayı ---
+        
+        if usage_locations:
+            msg = "Bu medya dosyası oyun içinde şu yerlerde kullanılmaktadır:\n\n"
+            msg += "\n".join(usage_locations[:12])
+            if len(usage_locations) > 12:
+                msg += f"\n... ve {len(usage_locations)-12} yer daha."
+            msg += "\n\nBu medyayı silmek ve kullanıldığı yerlerden (ayarlar, ekranlar vb.) KALDIRMAK istiyor musunuz?"
+            if not messagebox.askyesno("Kullanım Uyarısı", msg):
+                return
+        else:
+            if not messagebox.askyesno("Onay", "Bu medyayı silmek istediğinizden emin misiniz?"):
+                return
+
+        # --- 3. Temizlik ve Silme İşlemi ---
+        
+        try:
+            # A. Ayarlardan Kaldır
+            for s_key, s_val in settings.settings.items():
+                if s_val == path:
+                    self.game_service.update_setting(game_id, s_key, '')
+            
+            # B. Ekranlardan Kaldır
+            screens = self.screen_service.list_screens(game_id)
+            for sc in screens:
+                if not sc.data_json: continue
+                data = json.loads(sc.data_json)
+                changed = False
+                
+                if (data.get('background') or {}).get('image') == path:
+                    data['background']['image'] = ''
+                    changed = True
+                
+                if data.get('music') == path:
+                    data['music'] = ''
+                    changed = True
+                
+                old_widgets = data.get('widgets') or []
+                new_widgets = []
+                for w in old_widgets:
+                    if not isinstance(w, dict): continue
+                    if (w.get('sprite') or {}).get('image') == path:
+                        changed = True
+                        continue # Widget'ı kaldır
+                    new_widgets.append(w)
+                
+                if changed:
+                    data['widgets'] = new_widgets
+                    self.screen_service.upsert_screen(game_id, sc.name, sc.type, json.dumps(data))
+            
+            # C. Sprite Veritabanından Kaldır
+            if sprite_id:
+                # Önce tanımları (definitions) temizle
+                defs = self.sprite_service.get_all_definitions_for_sheet(sprite_id)
+                for d in defs:
+                    self.sprite_service.remove_sprite_definition(d.expression_id)
+                # Sheet kaydını sil
+                self.sprite_service.delete_sprite_sheet(sprite_id)
+            
+            # D. Fiziksel Dosyayı Sil
+            abs_p = self._abs_path(path)
+            if abs_p and os.path.isfile(abs_p):
+                try:
+                    os.remove(abs_p)
+                except Exception as e:
+                    print(f"File deletion error: {e}")
+            
+            messagebox.showinfo("Başarılı", "Medya ve ilişkili tüm referanslar silindi.")
+            
+        except Exception as e:
+            messagebox.showerror("Hata", f"Silme işlemi sırasında hata oluştu: {e}")
         finally:
             self._refresh_media_gallery()
 
@@ -577,6 +765,7 @@ class MainWindow:
         self.sprite_service = SpriteService(self.db_manager)
         self.screen_service = ScreenService(self.db_manager)
         self.effect_service = EffectService(self.db_manager)
+        self.template_service = TemplateService()
         # Effect servisinin root üzerinden de erişilebilir olmasını sağla (ScreensTab/ScreenDesigner için)
         try:
             setattr(self.root, "effect_service", self.effect_service)
@@ -594,6 +783,7 @@ class MainWindow:
         ttk.Button(navbar, text="Sprite'ları Düzenle", command=self._open_sprites_manager, style="Navbar.TButton").pack(side=tk.LEFT, padx=5)
         ttk.Button(navbar, text="Effectleri Düzenle", command=self._open_effects_manager, style="Navbar.TButton").pack(side=tk.LEFT, padx=5)
         ttk.Button(navbar, text="Medya'yı Düzenle", command=self._open_media_manager, style="Navbar.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(navbar, text="Fontları Düzenle", command=self._open_font_manager, style="Navbar.TButton").pack(side=tk.LEFT, padx=5)
         
         # Play button - Accent style
         ttk.Button(navbar, text="Oyun Oyna ▶", command=self._play_selected_game, style="Accent.TButton").pack(side=tk.RIGHT, padx=10)
@@ -609,9 +799,18 @@ class MainWindow:
             on_game_select=self._on_game_selected,
             on_add=self._add_game,
             on_edit=self._edit_game,
-            on_delete=self._delete_game
+            on_delete=self._delete_game,
+            on_template_toggle=self._on_template_toggle_callback
         )
         paned_window.add(self.games_list_frame, weight=1)
+        
+        # Secret shortcut for template editing - Using bind_all for global access
+        self.root.bind_all("<Command-Option-t>", self._on_template_shortcut)
+        self.root.bind_all("<Command-Option-T>", self._on_template_shortcut)
+        self.root.bind_all("<Command-Alt-t>", self._on_template_shortcut)
+        self.root.bind_all("<Command-Alt-T>", self._on_template_shortcut)
+        self.root.bind_all("<Control-Alt-t>", self._on_template_shortcut)
+        self.root.bind_all("<Control-Alt-T>", self._on_template_shortcut)
 
         # Right: Dashboard
         self.dashboard_frame = DashboardFrame(
@@ -789,6 +988,15 @@ class MainWindow:
         except Exception as e:
             messagebox.showerror("Effect", f"Pencere açılamadı: {e}")
 
+    def _open_font_manager(self) -> None:
+        """Open the standalone Font Manager window."""
+        try:
+            from .font_manager import FontManagerWindow
+            assets_fonts = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "assets/fonts")
+            FontManagerWindow(self.root, assets_fonts, None)
+        except Exception as e:
+            messagebox.showerror("Font", f"Pencere açılamadı: {e}")
+
     def _play_selected_game(self) -> None:
         """Seçili oyunu pygame penceresinde başlatır.
 
@@ -820,13 +1028,14 @@ class MainWindow:
         self.dashboard_frame.set_game(game)
 
     def _add_game(self):
-        """Handle request to add a new game."""
-        dialog = GameDialog(self.root, title="Yeni Oyun Ekle")
+        """Handle request to add a new game with template support."""
+        templates = self.template_service.list_templates()
+        dialog = GameDialog(self.root, title="Yeni Oyun Ekle", templates=templates)
         result = dialog.show()
         if not result:
             return
             
-        name, description = result
+        name, description, template_id = result
         try:
             if not name:
                 messagebox.showwarning("Geçersiz Ad", "Oyun adı boş olamaz.")
@@ -837,8 +1046,19 @@ class MainWindow:
                 messagebox.showwarning("Uyarı", f"'{name}' adında bir oyun zaten mevcut.")
                 return
 
-            game = self.game_service.create_game(name, description)
-            self._set_default_settings(game.id)
+            if template_id == "blank":
+                # Create blank game
+                game = self.game_service.create_game(name, description)
+                self._set_default_settings(game.id)
+            else:
+                # Create from template
+                template_data = self.template_service.get_template(template_id)
+                if template_data:
+                    game = self.game_service.create_game_from_template(name, description, template_data)
+                else:
+                    game = self.game_service.create_game(name, description)
+                    self._set_default_settings(game.id)
+
             messagebox.showinfo("Başarılı", f"'{name}' oyunu oluşturuldu.")
             self.games_list_frame.refresh_games(select_id=game.id)
                 
@@ -906,3 +1126,43 @@ class MainWindow:
         }
         for key, value in default_settings.items():
             self.game_service.update_setting(game_id, key, value)
+
+    def _on_template_shortcut(self, event=None):
+        """Toggle template visibility and sync if needed."""
+        current = self.games_list_frame.show_templates_var.get()
+        new_state = not current
+        self.games_list_frame.show_templates_var.set(new_state)
+        
+        if new_state:
+            self._sync_templates_to_db()
+            
+        self.games_list_frame.refresh_games()
+
+    def _sync_templates_to_db(self):
+        """Ensure all JSON templates have a corresponding entry in the DB for editing."""
+        templates = self.template_service.list_templates()
+        existing_games = self.game_service.get_games()
+        
+        for t in templates:
+            if t["id"] == "blank":
+                continue
+                
+            # Check if this template is already in the DB
+            if not any(g.is_template and g.name == t["name"] for g in existing_games):
+                try:
+                    # Create a "Mock" game for this template in the DB
+                    game = self.game_service.create_game_from_template(
+                        name=t["name"],
+                        description=t["description"],
+                        template_data=t,
+                        is_template=True
+                    )
+                    # Store template_id in settings for export
+                    self.game_service.update_setting(game.id, "template_id", t["id"])
+                except Exception as e:
+                    print(f"Error syncing template {t['name']}: {e}")
+
+    def _on_template_toggle_callback(self):
+        """Callback from GamesListFrame when template checkbox is toggled."""
+        if self.games_list_frame.show_templates_var.get():
+            self._sync_templates_to_db()

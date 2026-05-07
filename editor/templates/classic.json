@@ -1,0 +1,65 @@
+{
+  "id": "classic",
+  "name": "Klasik Yakalama",
+  "description": "Lush bir orman atmosferinde, temel fiziksel büyüklükleri sepetinizle yakalayın.",
+  "settings": {
+    "total_levels": "5",
+    "default_wrong_percentage": "20",
+    "default_item_speed": "2.0",
+    "default_max_items": "5",
+    "music_path": "assets/audio/classic_bg.mp3",
+    "catch_sound_path": "assets/audio/catch_classic.mp3",
+    "miss_sound_path": "assets/audio/miss.mp3"
+  },
+  "screens": [
+    {
+      "name": "opening",
+      "type": "opening",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Klasik Yakalama\", \"x\": 400, \"y\": 150, \"color\": \"#FFFFFF\", \"size\": 56, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Fiziksel Büyüklükleri Toplayın!\", \"x\": 400, \"y\": 220, \"color\": \"#E0E0E0\", \"size\": 24, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"OYUNA BAŞLA\", \"x\": 400, \"y\": 380, \"action\": \"start_game\", \"color\": \"#4CAF50\", \"font\": \"Arial\", \"font_size\": 28, \"border_radius\": 10}]}"
+    },
+    {
+      "name": "game_over",
+      "type": "game_over",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"OYUN BİTTİ\", \"x\": 400, \"y\": 200, \"color\": \"#FF5252\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"ANA MENÜ\", \"x\": 400, \"y\": 400, \"action\": \"back_to_menu\", \"color\": \"#607D8B\", \"font\": \"Arial\", \"font_size\": 24}]}"
+    }
+  ],
+  "levels": [
+    {
+      "number": 1,
+      "name": "Ormanda Yürüyüş",
+      "description": "Temel kavramları toplayarak yolculuğa başlayın.",
+      "settings": {
+        "wrong_answer_percentage": 15,
+        "item_speed": 1.8,
+        "max_items_on_screen": 4
+      },
+      "expressions": [
+        {"text": "Kütle", "correct": true},
+        {"text": "Zaman", "correct": true},
+        {"text": "Uzunluk", "correct": true},
+        {"text": "Hız", "correct": true},
+        {"text": "Masa", "correct": false},
+        {"text": "Kalem", "correct": false},
+        {"text": "Araba", "correct": false}
+      ]
+    },
+    {
+      "number": 2,
+      "name": "Hızlanıyoruz",
+      "description": "Daha hızlı kararlar vermeniz gerekecek.",
+      "settings": {
+        "wrong_answer_percentage": 25,
+        "item_speed": 2.5,
+        "max_items_on_screen": 5
+      },
+      "expressions": [
+        {"text": "Kuvvet", "correct": true},
+        {"text": "Enerji", "correct": true},
+        {"text": "Güç", "correct": true},
+        {"text": "Ağırlık", "correct": true},
+        {"text": "Defter", "correct": false},
+        {"text": "Gözlük", "correct": false}
+      ]
+    }
+  ]
+}

@@ -10,6 +10,7 @@ class Game:
     id: int
     name: str
     description: str = ""
+    is_template: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     
@@ -19,6 +20,7 @@ class Game:
             'id': self.id,
             'name': self.name,
             'description': self.description,
+            'is_template': self.is_template,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat()
         }
@@ -30,6 +32,7 @@ class Game:
             id=data['id'],
             name=data['name'],
             description=data.get('description', ''),
+            is_template=bool(data.get('is_template', 0)),
             created_at=datetime.fromisoformat(data['created_at']),
             updated_at=datetime.fromisoformat(data['updated_at'])
         )

@@ -36,6 +36,7 @@ class MediaTab:
 
     IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
     AUDIO_EXTS = {".wav", ".ogg", ".mp3", ".midi", ".mid"}
+    FONT_EXTS = {".ttf"}
 
     def __init__(self, parent, game_service):
         """Initialize the Media tab UI.
@@ -56,15 +57,18 @@ class MediaTab:
         self.dir_sprites = os.path.join(self.assets_root, "images", "sprites")
         self.dir_audio_music = os.path.join(self.assets_root, "audio", "music")
         self.dir_audio_sfx = os.path.join(self.assets_root, "audio", "sfx")
+        self.dir_fonts = os.path.join(self.assets_root, "fonts")
         os.makedirs(self.dir_backgrounds, exist_ok=True)
         os.makedirs(self.dir_sprites, exist_ok=True)
         os.makedirs(self.dir_audio_music, exist_ok=True)
         os.makedirs(self.dir_audio_sfx, exist_ok=True)
+        os.makedirs(self.dir_fonts, exist_ok=True)
 
         self.metadata_path = os.path.join(self.assets_root, "metadata.json")
         self.metadata: Dict[str, Dict[str, str]] = self._load_metadata()
 
         self._preview_img_ref = None
+        self._bg_gradient_ref = None
         self._audio_playing_path: Optional[str] = None
 
         self.frame = ttk.Frame(parent)
@@ -108,12 +112,25 @@ class MediaTab:
         left.rowconfigure(1, weight=1)
         left.columnconfigure(0, weight=1)
 
-        ttk.Label(left, text="Tür").grid(row=0, column=0, sticky="w")
         self.type_var = tk.StringVar(value="background")
-        type_combo = ttk.Combobox(left, textvariable=self.type_var, state="readonly",
-                                  values=["background", "audio", "sfx", "sprite"])
-        type_combo.grid(row=0, column=1, sticky="ew", padx=4)
-        type_combo.bind("<<ComboboxSelected>>", lambda e: self._reload_list())
+        
+        # Tür seçimi için Notebook (Sekmeli yapı)
+        self.type_notebook = ttk.Notebook(left)
+        self.type_notebook.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        
+        self._tab_map = {
+            0: "background",
+            1: "audio",
+            2: "sfx",
+            3: "sprite",
+            4: "font"
+        }
+        
+        tab_names = ["Arkaplan", "Müzik", "Ses Efekti", "Sprite", "Fontlar"]
+        for name in tab_names:
+            self.type_notebook.add(ttk.Frame(self.type_notebook), text=name)
+            
+        self.type_notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         self.tree = ttk.Treeview(left, columns=("name", "path"), show="headings", selectmode="browse")
         self.tree.heading("name", text="Ad")
@@ -144,10 +161,10 @@ class MediaTab:
         self.preview_canvas = tk.Canvas(prev_group, background="white", height=260)
         self.preview_canvas.grid(row=0, column=0, sticky="nsew")
 
-        audio_row = ttk.Frame(prev_group)
-        audio_row.grid(row=1, column=0, sticky="w", pady=(6, 0))
-        self.play_btn = ttk.Button(audio_row, text="▶ Oynat", command=self._play_audio, state="disabled")
-        self.stop_btn = ttk.Button(audio_row, text="■ Durdur", command=self._stop_audio, state="disabled")
+        self.audio_row = ttk.Frame(prev_group)
+        self.audio_row.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.play_btn = ttk.Button(self.audio_row, text="▶ Oynat", command=self._play_audio, state="disabled")
+        self.stop_btn = ttk.Button(self.audio_row, text="■ Durdur", command=self._stop_audio, state="disabled")
         self.play_btn.pack(side=tk.LEFT, padx=2)
         self.stop_btn.pack(side=tk.LEFT, padx=2)
 
@@ -177,36 +194,52 @@ class MediaTab:
         self.info_size_var = tk.StringVar()
         ttk.Label(info_frame, textvariable=self.info_size_var).grid(row=1, column=1, sticky="w")
 
-        ttk.Label(info_frame, text="Çözünürlük:").grid(row=2, column=0, sticky="e")
+        self.info_resolution_lbl = ttk.Label(info_frame, text="Çözünürlük:")
+        self.info_resolution_lbl.grid(row=2, column=0, sticky="e")
         self.info_resolution_var = tk.StringVar()
-        ttk.Label(info_frame, textvariable=self.info_resolution_var).grid(row=2, column=1, sticky="w")
-
-        ttk.Label(info_frame, text="Süre:").grid(row=3, column=0, sticky="e")
+        self.info_resolution_val = ttk.Label(info_frame, textvariable=self.info_resolution_var)
+        self.info_resolution_val.grid(row=2, column=1, sticky="w")
+ 
+        self.info_duration_lbl = ttk.Label(info_frame, text="Süre:")
+        self.info_duration_lbl.grid(row=3, column=0, sticky="e")
         self.info_duration_var = tk.StringVar()
-        ttk.Label(info_frame, textvariable=self.info_duration_var).grid(row=3, column=1, sticky="w")
-
-        ttk.Label(info_frame, text="Örnekleme / Kanal / Bit:").grid(row=4, column=0, sticky="e")
+        self.info_duration_val = ttk.Label(info_frame, textvariable=self.info_duration_var)
+        self.info_duration_val.grid(row=3, column=1, sticky="w")
+ 
+        self.info_audio_params_lbl = ttk.Label(info_frame, text="Örnekleme / Kanal / Bit:")
+        self.info_audio_params_lbl.grid(row=4, column=0, sticky="e")
         self.info_audio_params_var = tk.StringVar()
-        ttk.Label(info_frame, textvariable=self.info_audio_params_var).grid(row=4, column=1, sticky="w")
+        self.info_audio_params_val = ttk.Label(info_frame, textvariable=self.info_audio_params_var)
+        self.info_audio_params_val.grid(row=4, column=1, sticky="w")
 
         act_row = ttk.Frame(details)
         act_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Button(act_row, text="Açıklamayı Kaydet", command=self._save_description).pack(side=tk.LEFT, padx=2)
 
         # Image tools
-        tools = ttk.LabelFrame(right, text="Görsel Hazırlama Araçları", padding=8)
-        tools.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.image_tools_frame = ttk.LabelFrame(right, text="Görsel Hazırlama Araçları", padding=8)
+        self.image_tools_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
-        ttk.Button(tools, text="1024x768'e Ölçekle (kopya)", command=self._scale_1024_768).pack(side=tk.LEFT, padx=4)
-        ttk.Label(tools, text="%").pack(side=tk.LEFT)
+        ttk.Button(self.image_tools_frame, text="1024x768'e Ölçekle (kopya)", command=self._scale_1024_768).pack(side=tk.LEFT, padx=4)
+        ttk.Label(self.image_tools_frame, text="%").pack(side=tk.LEFT)
         self.scale_percent_var = tk.StringVar(value="50")
-        ttk.Entry(tools, textvariable=self.scale_percent_var, width=5).pack(side=tk.LEFT, padx=2)
-        ttk.Button(tools, text="Oransal Ölçekle (kopya)", command=self._scale_percent).pack(side=tk.LEFT, padx=4)
+        ttk.Entry(self.image_tools_frame, textvariable=self.scale_percent_var, width=5).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self.image_tools_frame, text="Oransal Ölçekle (kopya)", command=self._scale_percent).pack(side=tk.LEFT, padx=4)
 
     def refresh(self) -> None:
         """Refresh the tab and list files (descriptions are global)."""
         self._reload_list()
         self._update_preview_controls(None)
+
+    def _on_tab_changed(self, event) -> None:
+        """Sekme değiştiğinde medya listesini yeniler."""
+        try:
+            idx = self.type_notebook.index("current")
+            new_type = self._tab_map.get(idx, "background")
+            self.type_var.set(new_type)
+            self._reload_list()
+        except Exception:
+            pass
 
     def _reload_list(self) -> None:
         """Reload the file list based on selected type."""
@@ -241,6 +274,8 @@ class MediaTab:
             return self.dir_sprites
         if t == "audio":
             return self.dir_audio_music
+        if t == "font":
+            return self.dir_fonts
         # default sfx
         return self.dir_audio_sfx
 
@@ -267,12 +302,41 @@ class MediaTab:
         ext = os.path.splitext(path)[1].lower()
         if ext in self.IMAGE_EXTS and os.path.isfile(path):
             try:
+                self._draw_gradient_background()
                 img = Image.open(path)
                 img.thumbnail((420, 260), Image.LANCZOS)
                 self._preview_img_ref = ImageTk.PhotoImage(img)
-                self.preview_canvas.create_image(10, 10, anchor="nw", image=self._preview_img_ref)
+                
+                self.preview_canvas.update_idletasks()
+                cw = self.preview_canvas.winfo_width()
+                ch = self.preview_canvas.winfo_height()
+                if cw < 50: cw, ch = 420, 260
+                
+                self.preview_canvas.create_image(cw//2, ch//2, anchor="center", image=self._preview_img_ref)
             except Exception as e:
                 messagebox.showerror("Önizleme Hatası", str(e))
+
+    def _draw_gradient_background(self) -> None:
+        """Önizleme kanvasına şık bir koyu gradient çizer."""
+        self.preview_canvas.update_idletasks()
+        w = self.preview_canvas.winfo_width()
+        h = self.preview_canvas.winfo_height()
+        if w < 50: w, h = 420, 260
+        
+        # 1xH boyutunda gradient oluşturup genişletelim (Performans için)
+        top_color = (45, 49, 58)    # Biraz daha açık gri
+        bottom_color = (20, 22, 26) # Neredeyse siyah
+        
+        grad_img = Image.new('RGB', (1, h))
+        for y in range(h):
+            r = int(top_color[0] + (bottom_color[0] - top_color[0]) * (y / h))
+            g = int(top_color[1] + (bottom_color[1] - top_color[1]) * (y / h))
+            b = int(top_color[2] + (bottom_color[2] - top_color[2]) * (y / h))
+            grad_img.putpixel((0, y), (r, g, b))
+            
+        full_bg = grad_img.resize((w, h), Image.LANCZOS)
+        self._bg_gradient_ref = ImageTk.PhotoImage(full_bg)
+        self.preview_canvas.create_image(0, 0, anchor="nw", image=self._bg_gradient_ref)
 
     def _update_file_info(self, path: Optional[str]) -> None:
         """Update file info labels based on selected file."""
@@ -326,21 +390,95 @@ class MediaTab:
                     pass
 
     def _update_preview_controls(self, path: Optional[str]) -> None:
-        """Enable/disable audio controls depending on selected file."""
+        """Enable/disable and show/hide controls depending on selected file."""
+        # Varsayılan gizlemeler
         self.play_btn.config(state="disabled")
         self.stop_btn.config(state="disabled")
+        
+        self.audio_row.grid_forget()
+        self.preview_canvas.grid_forget()
+        self.image_tools_frame.grid_forget()
+        
+        self.info_resolution_lbl.grid_forget(); self.info_resolution_val.grid_forget()
+        self.info_duration_lbl.grid_forget(); self.info_duration_val.grid_forget()
+        self.info_audio_params_lbl.grid_forget(); self.info_audio_params_val.grid_forget()
+
         if not path:
             return
+            
         ext = os.path.splitext(path)[1].lower()
-        if ext in self.AUDIO_EXTS and _HAVE_PYGAME:
-            self.play_btn.config(state="normal")
-            self.stop_btn.config(state="normal")
+        
+        if ext in self.IMAGE_EXTS:
+            self.preview_canvas.grid(row=0, column=0, sticky="nsew")
+            self.image_tools_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+            self.info_resolution_lbl.grid(row=2, column=0, sticky="e")
+            self.info_resolution_val.grid(row=2, column=1, sticky="w")
+            
+        elif ext in self.AUDIO_EXTS:
+            self.audio_row.grid(row=1, column=0, sticky="w", pady=(6, 0))
+            self.info_duration_lbl.grid(row=3, column=0, sticky="e")
+            self.info_duration_val.grid(row=3, column=1, sticky="w")
+            self.info_audio_params_lbl.grid(row=4, column=0, sticky="e")
+            self.info_audio_params_val.grid(row=4, column=1, sticky="w")
+            
+            if _HAVE_PYGAME:
+                self.play_btn.config(state="normal")
+                self.stop_btn.config(state="normal")
+        
+        elif ext in self.FONT_EXTS:
+            self.preview_canvas.grid(row=0, column=0, sticky="nsew")
+            self._render_font_preview(path)
+
+    def _render_font_preview(self, path: str) -> None:
+        """Render a sample text using the font at path onto the preview canvas."""
+        if not _HAVE_PYGAME or not self._ensure_audio_ready():
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_text(250, 130, text="[Pygame Font Modülü Yüklü Değil]", fill="red")
+            return
+            
+        try:
+            from PIL import Image, ImageTk
+            import pygame
+            
+            # Sample text
+            text = "ABC abc 123 !@#"
+            
+            # Pygame render
+            pg_font = pygame.font.Font(path, 48)
+            surf = pg_font.render(text, True, (0, 0, 0)) # Siyah metin (canvas beyaz)
+            
+            # Surface -> PIL
+            data = pygame.image.tostring(surf, "RGB")
+            img = Image.frombytes("RGB", surf.get_size(), data)
+            
+            # Canvas center
+            cw = self.preview_canvas.winfo_width()
+            ch = self.preview_canvas.winfo_height()
+            if cw < 10: cw = 500
+            if ch < 10: ch = 260
+            
+            # Scale if too wide
+            iw, ih = img.size
+            if iw > cw - 40:
+                scale = (cw - 40) / iw
+                img = img.resize((int(iw * scale), int(ih * scale)), Image.LANCZOS)
+            
+            photo = ImageTk.PhotoImage(img)
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_image(cw//2, ch//2, anchor="center", image=photo)
+            self._preview_img_ref = photo # GC protection
+            
+        except Exception as e:
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_text(250, 130, text=f"Font Önizleme Hatası: {e}", fill="red")
 
     def _upload_media(self) -> None:
         """Open file dialog and copy selected file into assets with sanitized name."""
         t = self.type_var.get()
         if t in ("background", "sprite"):
             exts = [("Görseller", "*.png *.jpg *.jpeg *.bmp *.gif"), ("Tüm Dosyalar", "*.*")]
+        elif t == "font":
+            exts = [("Fontlar", "*.ttf"), ("Tüm Dosyalar", "*.*")]
         else:
             exts = [("Ses", "*.wav *.ogg *.mp3 *.midi *.mid"), ("Tüm Dosyalar", "*.*")]
         
