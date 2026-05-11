@@ -5,6 +5,8 @@ elements and rendering for the game.
 """
 
 import os
+import math
+import time
 from typing import List, Optional, Tuple, Union
 
 import pygame
@@ -194,50 +196,50 @@ class UIManager:
         help_mode: bool = False,
         remaining_items: Optional[List[str]] = None
     ) -> None:
-        """Draw the heads-up display with game information.
+        """Draw the heads-up display with game information."""
+        # 1. Background Panel (Modern, glassmorphism style)
+        hud_bg = pygame.Surface((settings.SCREEN_WIDTH, 60), pygame.SRCALPHA)
+        pygame.draw.rect(hud_bg, (20, 20, 30, 160), (0, 0, settings.SCREEN_WIDTH, 60))
+        pygame.draw.line(hud_bg, (100, 100, 255, 100), (0, 59), (settings.SCREEN_WIDTH, 59), 2)
+        surface.blit(hud_bg, (0, 0))
+
+        # 2. Draw Score (Center)
+        score_text = f"SKOR: {score}"
+        self._draw_text_with_shadow(surface, score_text, 'medium', 
+                      settings.SCREEN_WIDTH // 2, 15, (255, 215, 0))
         
-        Args:
-            surface: The pygame surface to draw on.
-            score: Current player score.
-            lives: Remaining player lives.
-            level: Current level number.
-            target_category: The target category for the current level.
-            help_mode: Whether to show the help menu.
-            remaining_items: List of items remaining to be caught.
-        """
-        # Draw score (centered at top)
-        self.draw_text(surface, f"Puan: {score}", 'medium', 
-                      settings.SCREEN_WIDTH // 2, 10, settings.BLACK)
+        # 3. Draw Lives (Left side, with simple heart icon if possible)
+        lives_color = (255, 80, 80) if lives <= 1 else (255, 255, 255)
+        self._draw_text_with_shadow(surface, f"CAN: {lives}", 'medium', 
+                      120, 15, lives_color, align="left")
         
-        # Draw lives (top-left)
-        self.draw_text(surface, f"Can: {lives}", 'medium', 
-                      60, 10, settings.BLACK, "left")
+        # 4. Draw Level & Category (Right side)
+        level_text = f"SEVİYE {level}"
+        cat_text = f"HEDEF: {target_category}"
+        self._draw_text_with_shadow(surface, level_text, 'small', 
+                      settings.SCREEN_WIDTH - 20, 10, (200, 200, 255), align="right")
+        self._draw_text_with_shadow(surface, cat_text, 'small', 
+                      settings.SCREEN_WIDTH - 20, 32, (255, 255, 255), align="right")
         
-        # Draw level info (top-right)
-        level_text = f"Seviye {level}: {target_category}"
-        self.draw_text(surface, level_text, 'small', 
-                      settings.SCREEN_WIDTH - 10, 10, settings.BLACK, "right")
-        
-        # Draw help button (top-left)
+        # 5. Draw help button (top-left)
         self._draw_help_button(surface)
         
-        # Draw help menu if enabled
+        # 6. Draw help menu if enabled
         if help_mode and remaining_items:
             self._draw_help_menu(surface, remaining_items)
     
     def _draw_help_button(self, surface: Surface) -> Optional[Rect]:
-        """Draw the help button in the top-left corner.
-        
-        Args:
-            surface: The pygame surface to draw on.
-            
-        Returns:
-            The Rect of the help button if drawn, None otherwise.
-        """
+        """Draw the help button in the top-left corner."""
         if not self.help_button_img:
-            return None
+            # Fallback to a simple [?] button
+            btn_rect = pygame.Rect(10, 10, 40, 40)
+            pygame.draw.rect(surface, (60, 60, 100), btn_rect, border_radius=8)
+            pygame.draw.rect(surface, (150, 150, 255), btn_rect, width=2, border_radius=8)
+            self.draw_text(surface, "?", "medium", 30, 15, (255, 255, 255), "center")
+            return btn_rect
             
         help_button_rect = self.help_button_img.get_rect(topleft=(10, 10))
+        # Add glow if hovered (simulated)
         surface.blit(self.help_button_img, help_button_rect)
         return help_button_rect
     
@@ -245,85 +247,55 @@ class UIManager:
         self, 
         surface: Surface, 
         remaining_items: List[str],
-        max_width: int = 220,
-        item_height: int = 25,
-        padding: int = 10
+        max_width: int = 240,
+        item_height: int = 28,
+        padding: int = 15
     ) -> Rect:
-        """Draw the help menu showing remaining items.
-        
-        Args:
-            surface: The pygame surface to draw on.
-            remaining_items: List of items to display.
-            max_width: Maximum width of the help menu.
-            item_height: Height of each item in the menu.
-            padding: Padding around the menu.
-            
-        Returns:
-            The Rect of the help menu.
-        """
+        """Draw the help menu showing remaining items."""
         if not remaining_items:
             return pygame.Rect(0, 0, 0, 0)
         
-        # Calculate menu dimensions
-        menu_width = min(max_width, settings.SCREEN_WIDTH - 40)  # Ensure it fits on screen
-        menu_height = 60 + (len(remaining_items) * item_height)
+        menu_width = max_width
+        menu_height = 50 + (len(remaining_items) * item_height)
         
-        # Position the menu based on configured anchor
-        if (self.help_area or '').lower() == 'top-left':
-            menu_x = padding
-            menu_y = 60  # Below the HUD
-        else:
-            # default top-right
-            menu_x = settings.SCREEN_WIDTH - menu_width - padding
-            menu_y = 60
+        # Position: Left side, below HUD
+        menu_x = padding
+        menu_y = 70
         
-        # Create menu rectangle
         menu_rect = pygame.Rect(menu_x, menu_y, menu_width, menu_height)
         
-        # Create a surface for the menu with per-pixel alpha
+        # Glassmorphism effect for menu
         menu_surface = pygame.Surface(menu_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(menu_surface, (20, 20, 40, 200), menu_surface.get_rect(), border_radius=12)
+        pygame.draw.rect(menu_surface, (100, 100, 255, 150), menu_surface.get_rect(), 2, border_radius=12)
 
-        # Draw background with transparency
-        if self.help_menu_bg:
-            # Scale the background to fit the menu
-            scaled_bg = pygame.transform.scale(self.help_menu_bg, menu_rect.size)
-            menu_surface.blit(scaled_bg, (0, 0))
-        else:
-            # Fallback to a solid color if image fails to load
-            menu_surface.fill((230, 230, 255, 0)) # Transparent fallback
-
-        # Set overall transparency to 50%
-        menu_surface.set_alpha(128) # 128 is 50% of 255
-        
-        # Draw a border on the menu surface
-        pygame.draw.rect(menu_surface, (200, 200, 255, 180), menu_surface.get_rect(), 2, border_radius=10)
-
-        # Draw title on the menu surface (coordinates are relative to the surface)
+        # Title
         self.draw_text(
             menu_surface, 
-            "Kalanlar:", 
-            'medium', 
+            "TOPLANACAKLAR", 
+            'small', 
             menu_width // 2, 
-            10,
-            settings.BLUE,
+            12,
+            (255, 215, 0),
             "center"
         )
+        pygame.draw.line(menu_surface, (100, 100, 255, 100), (20, 38), (menu_width - 20, 38), 1)
         
-        # Draw items on the menu surface (coordinates are relative to the surface)
+        # Items
         for idx, item in enumerate(remaining_items):
+            # Bullets
+            pygame.draw.circle(menu_surface, (0, 255, 100), (25, 58 + idx * item_height), 4)
             self.draw_text(
                 menu_surface, 
                 item, 
                 'small',
-                15, 
-                40 + (idx * item_height), 
-                settings.BLACK,
+                40, 
+                48 + (idx * item_height), 
+                (255, 255, 255),
                 "left"
             )
         
-        # Blit the final menu surface to the main screen
         surface.blit(menu_surface, menu_rect.topleft)
-            
         return menu_rect
     
     def draw_splash_screen(
@@ -429,49 +401,20 @@ class UIManager:
         )
     
     def draw_game_over(self, surface: Surface, score: int) -> None:
-        """Draw the game over screen with final score.
-        
-        Args:
-            surface: The pygame surface to draw on.
-            score: The final score to display.
-        """
-        # Semi-transparent overlay
-        overlay = Surface((settings.SCREEN_WIDTH, settings.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 200))  # More opaque for better text readability
+        """Draw the game over screen."""
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        overlay.fill((40, 10, 10, 200))
         surface.blit(overlay, (0, 0))
         
-        # Game over text with shadow
-        self._draw_text_with_shadow(
-            surface,
-            "OYUN BİTTİ!",
-            'large',
-            settings.SCREEN_WIDTH // 2,
-            settings.SCREEN_HEIGHT // 4,
-            settings.RED,
-            shadow_color=(150, 0, 0)
-        )
+        panel_w, panel_h = 500, 300
+        panel_rect = pygame.Rect((settings.SCREEN_WIDTH - panel_w)//2, (settings.SCREEN_HEIGHT - panel_h)//2, panel_w, panel_h)
         
-        # Score display
-        self._draw_text_with_shadow(
-            surface,
-            f"Skorunuz: {score}",
-            'medium',
-            settings.SCREEN_WIDTH // 2,
-            settings.SCREEN_HEIGHT // 2,
-            settings.WHITE,
-            shadow_color=(100, 100, 100)
-        )
+        pygame.draw.rect(surface, (40, 20, 20), panel_rect, border_radius=20)
+        pygame.draw.rect(surface, (255, 80, 80), panel_rect, width=3, border_radius=20)
         
-        # Instruction
-        self._draw_text_with_shadow(
-            surface,
-            "Yeniden başlamak için bir tuşa basın.",
-            'medium',
-            settings.SCREEN_WIDTH // 2,
-            settings.SCREEN_HEIGHT * 3 // 4,
-            settings.LIGHT_GRAY,
-            shadow_color=(50, 50, 50)
-        )
+        self._draw_text_with_shadow(surface, "OYUN BİTTİ", 'large', settings.SCREEN_WIDTH // 2, settings.SCREEN_HEIGHT // 2 - 60, (255, 80, 80))
+        self._draw_text_with_shadow(surface, f"Toplam Skor: {score}", 'medium', settings.SCREEN_WIDTH // 2, settings.SCREEN_HEIGHT // 2, (255, 255, 255))
+        self._draw_text_with_shadow(surface, "Yeniden başlamak için R, çıkmak için ESC", 'small', settings.SCREEN_WIDTH // 2, settings.SCREEN_HEIGHT // 2 + 80, (200, 200, 200))
         
     def _draw_text_with_shadow(
         self,
@@ -504,64 +447,40 @@ class UIManager:
         # Draw main text
         self.draw_text(surface, text, size, x, y, color, align)
     
-    def draw_level_up(
-        self, 
-        surface: Surface, 
-        level: int, 
-        target_category: str
-    ) -> None:
-        """Draw the level completion screen.
-        
-        Args:
-            surface: The pygame surface to draw on.
-            level: The level that was just completed.
-            target_category: The target category for the next level.
-        """
-        # Semi-transparent overlay with blur effect (simulated with alpha)
-        overlay = Surface((settings.SCREEN_WIDTH, settings.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))  # More opaque for better readability
+    def draw_level_up(self, surface: Surface, level: int, target_category: str) -> None:
+        """Draw the level up screen with a premium glassmorphism effect."""
+        # Darkening overlay
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
         surface.blit(overlay, (0, 0))
         
-        # Level up text with shadow
-        self._draw_text_with_shadow(
-            surface,
-            "TEBRİKLER!",
-            'large',
-            settings.SCREEN_WIDTH // 2,
-            settings.SCREEN_HEIGHT // 4,
-            settings.GREEN,
-            shadow_color=(0, 100, 0)
-        )
+        # Panel
+        panel_w, panel_h = 560, 360
+        panel_rect = pygame.Rect((settings.SCREEN_WIDTH - panel_w)//2, (settings.SCREEN_HEIGHT - panel_h)//2, panel_w, panel_h)
         
-        # Level info
-        self._draw_text_with_shadow(
-            surface,
-            f"Seviye {level} Tamamlandı!",
-            'medium',
-            settings.SCREEN_WIDTH // 2,
-            settings.SCREEN_HEIGHT // 2 - 20,
-            settings.WHITE,
-            shadow_color=(50, 50, 50)
-        )
+        # Animated Glow (using time for pulse)
+        pulse = (math.sin(time.time() * 5) + 1) / 2
+        glow_size = int(10 + pulse * 10)
+        for i in range(glow_size):
+            alpha = int((glow_size - i) * (2 + pulse * 2))
+            pygame.draw.rect(surface, (0, 255, 150, alpha), panel_rect.inflate(i*2, i*2), border_radius=30, width=2)
+            
+        # Glass Panel
+        glass = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        pygame.draw.rect(glass, (255, 255, 255, 15), glass.get_rect(), border_radius=30)
+        pygame.draw.rect(glass, (255, 255, 255, 40), glass.get_rect(), width=2, border_radius=30)
+        surface.blit(glass, panel_rect.topleft)
         
-        # Next level info
-        self._draw_text_with_shadow(
-            surface,
-            f"Sonraki Seviye: {target_category}",
-            'medium',
-            settings.SCREEN_WIDTH // 2,
-            settings.SCREEN_HEIGHT // 2 + 20,
-            settings.LIGHT_GREEN,
-            shadow_color=(0, 80, 0)
-        )
+        # Text Content
+        cx, cy = settings.SCREEN_WIDTH // 2, settings.SCREEN_HEIGHT // 2
+        self._draw_text_with_shadow(surface, "TEBRİKLER!", 'large', cx, cy - 100, (0, 255, 150))
+        self._draw_text_with_shadow(surface, f"Seviye {level-1} Tamamlandı", 'medium', cx, cy - 20, (255, 255, 255))
         
-        # Instruction
-        self._draw_text_with_shadow(
-            surface,
-            "Devam etmek için bir tuşa basın...",
-            'small',
-            settings.SCREEN_WIDTH // 2,
-            settings.SCREEN_HEIGHT * 3 // 4,
-            settings.LIGHT_GRAY,
-            shadow_color=(50, 50, 50)
-        )
+        # New Target Info Box
+        info_rect = pygame.Rect(cx - 200, cy + 30, 400, 60)
+        pygame.draw.rect(surface, (0, 0, 0, 100), info_rect, border_radius=15)
+        self._draw_text_with_shadow(surface, f"Yeni Hedef: {target_category}", 'small', cx, info_rect.centery, (200, 255, 200))
+        
+        # Continue Prompt
+        prompt_alpha = int(150 + pulse * 105)
+        self._draw_text_with_shadow(surface, "Devam etmek için TIKLAYIN", 'small', cx, cy + 130, (255, 255, 255, prompt_alpha))

@@ -153,14 +153,13 @@ class GameState:
             
         # Check for level completion
         if level_manager.is_level_complete():
-            if level_manager.level >= len(level_manager.LEVEL_TARGETS):
-                self.game_over = True
-                return 'game_over'
+            next_level = level_manager.level + 1
+            # Check if next level exists in DB by trying to set it up
+            if level_manager.setup_level(next_level, getattr(level_manager, 'game_id', None)):
+                 return 'level_up'
             else:
-                level_manager.level += 1
-                # Pass active game_id as required by LevelManager.setup_level(level, game_id)
-                level_manager.setup_level(level_manager.level, getattr(level_manager, 'game_id', None))
-                return 'level_up'
+                 self.game_over = True
+                 return 'game_over'
                 
         # Update effects
         self.cleanup_effects()

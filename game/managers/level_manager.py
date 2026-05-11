@@ -108,7 +108,7 @@ class LevelManager:
         self.max_items_on_screen: int = 5
         self.wrong_answer_percentage: int = 40
     
-    def setup_level(self, level_number: int, game_id: int):
+    def setup_level(self, level_number: int, game_id: int) -> bool:
         """Belirtilen numara ile yeni bir seviye kurulumu yapar.
 
         Doc:
@@ -121,16 +121,16 @@ class LevelManager:
             level_number: Kurulacak seviye numarası.
             game_id: Aktif oyun id'si.
 
-        Raises:
-            KeyError: Eğer seviye numarası geçersizse.
+        Returns:
+            bool: Seviye başarıyla yüklendiyse True.
         """
-        self.level = level_number
-        self.game_id = game_id
-
         level_data = self.db.get_level_data(game_id, level_number)
         if not level_data:
-            print(f"Error: Level {level_number} for game {game_id} not found in database.")
-            return
+            print(f"Level {level_number} for game {game_id} not found in database.")
+            return False
+
+        self.level = level_number
+        self.game_id = game_id
 
         level_id = level_data['id']
         self.target_category = level_data['level_name'] # Using level name as target for now
@@ -169,12 +169,14 @@ class LevelManager:
             
             print(f"[LevelManager] Setup Level {level_number}: Speed={self.item_speed}, "
                   f"Wrong%={self.wrong_answer_percentage}, MaxItems={self.max_items_on_screen}")
+            return True
 
         except Exception as e:
             print(f"[LevelManager] Error loading level settings: {e}. Using defaults.")
             self.item_speed = 3.0
             self.max_items_on_screen = 5
             self.wrong_answer_percentage = 40
+            return True
     
     def get_new_item(self) -> Tuple[str, str]:
         """Get a new item for the current level.

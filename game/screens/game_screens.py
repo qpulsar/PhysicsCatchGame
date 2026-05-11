@@ -591,12 +591,16 @@ def _draw_level_tree(screen, center_rect: pygame.Rect, levels: list, progress: f
 
 def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
     """Draws the game selection carousel and handles the 'no games' state."""
-    screen.fill(CAROUSEL_BG_COLOR)
+    # Darker, deep space background
+    screen.fill((15, 15, 25)) 
     mesh_bg.update()
     mesh_bg.draw(screen)
     
     if carousel:
-        draw_text(screen, "Bir Oyun Seç", 56, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.14, TEXT_COLOR)
+        # Title with a subtle glow (multiple draws)
+        title = "Bir Macera Seç"
+        draw_text(screen, title, 56, SCREEN_WIDTH / 2 + 2, SCREEN_HEIGHT * 0.14 + 2, (0, 0, 0, 100))
+        draw_text(screen, title, 56, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.14, (100, 200, 255))
         
         carousel.update()
 
@@ -616,52 +620,84 @@ def draw_game_selection_screen(screen, carousel, mesh_bg, mouse_pos):
                 levels = Database().get_levels(getattr(selected_game, 'id', 0))
                 _draw_level_tree(screen, sel_rect, levels, carousel.anim_progress)
         except Exception as e:
-            print(f"Tree draw error: {e}")
             pass
         
         # Şimdi kartları öne çiz
         carousel.draw(screen)
     else:
-        draw_text(screen, "Oyun Bulunamadı", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, TEXT_COLOR)
+        draw_text(screen, "Oyun Bulunamadı", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3, (255, 100, 100))
         draw_text(screen, "Lütfen editör programını kullanarak bir oyun oluşturun.", 28, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, TEXT_COLOR)
         
-    # Draw the "Oyun Tasarla" button with a hover effect
-    editor_button_rect = pygame.Rect(SCREEN_WIDTH - 220, SCREEN_HEIGHT - 70, 200, 50)
+    # Design button with modern look
+    editor_button_rect = pygame.Rect(SCREEN_WIDTH - 240, SCREEN_HEIGHT - 80, 220, 60)
     is_hovered = editor_button_rect.collidepoint(mouse_pos)
     
-    button_color = PURPLE_LIGHT if is_hovered else PURPLE
+    btn_color = (180, 100, 255) if is_hovered else (150, 50, 200)
+    pygame.draw.rect(screen, (0, 0, 0, 100), editor_button_rect.move(4, 4), border_radius=15)
+    pygame.draw.rect(screen, btn_color, editor_button_rect, border_radius=15)
+    pygame.draw.rect(screen, (255, 255, 255, 50), editor_button_rect, width=2, border_radius=15)
     
-    pygame.draw.rect(screen, button_color, editor_button_rect, border_radius=10)
-    draw_text(screen, "Oyun Tasarla", 32, editor_button_rect.centerx, editor_button_rect.centery, TEXT_COLOR)
+    draw_text(screen, "Oyun Tasarla", 32, editor_button_rect.centerx, editor_button_rect.centery - 2, WHITE)
     return editor_button_rect
 
 def draw_game_info_screen(screen, game, mesh_bg, mouse_pos, bg_surface: pygame.Surface | None = None):
-    """Draws the selected game's information screen with a Start button."""
+    """Draws the selected game's information screen with a premium modern look."""
+    # Background
     if bg_surface:
         scaled = pygame.transform.scale(bg_surface, (SCREEN_WIDTH, SCREEN_HEIGHT))
         screen.blit(scaled, (0, 0))
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 10, 25, 160)) # Deeper, tinted overlay
+        screen.blit(overlay, (0, 0))
     else:
-        screen.fill(CAROUSEL_BG_COLOR)
+        screen.fill((10, 10, 20))
         mesh_bg.update()
         mesh_bg.draw(screen)
 
-    title = getattr(game, 'name', 'Seçilen Oyun')
-    description = getattr(game, 'description', '') or "Bu oyunun kuralları: Doğru nesneleri yakalayarak puan kazan. Yanlışları kaçır. Seviye hedefini tamamla."
+    # Main Panel (Glassmorphism)
+    panel_w, panel_h = int(SCREEN_WIDTH * 0.8), int(SCREEN_HEIGHT * 0.7)
+    panel_rect = pygame.Rect((SCREEN_WIDTH - panel_w)//2, (SCREEN_HEIGHT - panel_h)//2, panel_w, panel_h)
+    
+    panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    pygame.draw.rect(panel_surf, (255, 255, 255, 20), panel_surf.get_rect(), border_radius=30)
+    pygame.draw.rect(panel_surf, (255, 255, 255, 40), panel_surf.get_rect(), width=2, border_radius=30)
+    screen.blit(panel_surf, panel_rect.topleft)
 
-    # Başlık
-    draw_text(screen, title, 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.18, TEXT_COLOR)
+    title = getattr(game, 'name', 'Fizik Macerası').upper()
+    description = getattr(game, 'description', '') or "Doğru fiziksel büyüklükleri topla, yanlışlardan kaçın ve rekorunu kır!"
 
-    # Açıklama/kural metni (sarılmış)
-    content_width = int(SCREEN_WIDTH * 0.7)
-    draw_text(screen, description, 28, SCREEN_WIDTH / 2, SCREEN_HEIGHT * 0.38, TEXT_COLOR, wrap_width=content_width)
+    # Title with dual glow
+    from .core.utils import draw_text as _draw_text
+    _draw_text(screen, title, 80, SCREEN_WIDTH // 2, panel_rect.top + 70, (100, 200, 255))
+    _draw_text(screen, title, 80, SCREEN_WIDTH // 2 - 2, panel_rect.top + 68, WHITE)
 
-    # Başla butonu
-    btn_width, btn_height = 260, 64
-    start_button_rect = pygame.Rect((SCREEN_WIDTH - btn_width) // 2, int(SCREEN_HEIGHT * 0.72), btn_width, btn_height)
+    # Decorative separator
+    sep_w = 400
+    pygame.draw.line(screen, (100, 200, 255, 100), (SCREEN_WIDTH//2 - sep_w//2, panel_rect.top + 130), (SCREEN_WIDTH//2 + sep_w//2, panel_rect.top + 130), 2)
+
+    # Description text
+    _draw_text(screen, description, 30, SCREEN_WIDTH // 2, panel_rect.top + 200, (220, 220, 250), wrap_width=panel_w - 100)
+
+    # Control hint
+    hint_rect = pygame.Rect(SCREEN_WIDTH // 2 - 200, panel_rect.bottom - 180, 400, 60)
+    pygame.draw.rect(screen, (0, 0, 0, 100), hint_rect, border_radius=15)
+    _draw_text(screen, "Kontrol: Yön Tuşları / Mouse", 22, SCREEN_WIDTH // 2, hint_rect.centery, (150, 180, 255))
+
+    # Start Button
+    btn_w, btn_h = 320, 80
+    start_button_rect = pygame.Rect((SCREEN_WIDTH - btn_w)//2, panel_rect.bottom - 80, btn_w, btn_h)
     is_hovered = start_button_rect.collidepoint(mouse_pos)
-    button_color = LIGHT_GREEN if is_hovered else GREEN
-    pygame.draw.rect(screen, button_color, start_button_rect, border_radius=12)
-    draw_text(screen, "Başla", 36, start_button_rect.centerx, start_button_rect.centery, WHITE)
+    
+    # Button glow
+    glow_color = (0, 255, 150, 60) if is_hovered else (0, 200, 100, 30)
+    for i in range(8):
+        pygame.draw.rect(screen, glow_color, start_button_rect.inflate(i*3, i*3), border_radius=20, width=1)
+
+    btn_color = (0, 255, 150) if is_hovered else (0, 200, 100)
+    pygame.draw.rect(screen, btn_color, start_button_rect, border_radius=20)
+    pygame.draw.rect(screen, WHITE, start_button_rect, width=3, border_radius=20)
+    
+    _draw_text(screen, "OYUNU BAŞLAT", 44, start_button_rect.centerx, start_button_rect.centery - 2, (10, 40, 30))
 
     return start_button_rect
 

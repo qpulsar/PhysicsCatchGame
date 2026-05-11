@@ -286,24 +286,33 @@ class Game:
 
     def handle_mouse_click(self, pos):
         if self.current_state == 'opening':
-            # Opening ekranÄ±ndaki butonlara tÄ±kla
+            # Opening ekranındaki butonlara tıkla
             for b in self.opening_buttons:
                 if b['rect'].collidepoint(pos):
                     act = b.get('action')
                     if act in ('start_game', 'continue'):
-                        # opening sonrasÄ± akÄ±ÅŸ: level info varsa gÃ¶sterilecek, yoksa oynanÄ±ÅŸ
-                        # Screen Designer bazÄ± kurulumlarda seviye ekranlarÄ±nÄ± level_<DB id> adÄ±yla kaydediyor.
-                        # Oyunda hem numaraya hem de DB id'ye gÃ¶re isimleri deneyelim.
+                        # opening sonrası akış: level info varsa gösterilecek, yoksa oynanış
                         if not self._try_switch_to_level_info(self.selected_game_id, 1):
                             self._start_playing(self.selected_game_id, 1)
                     elif act == 'back':
                         self.current_state = 'game_selection'
                     break
+        
+        elif self.current_state == 'level_up':
+            # Level up ekranında herhangi bir yere tıklayınca sonraki seviyeye geç
+            if not self._try_switch_to_level_info(self.selected_game_id, self.level_manager.level):
+                self._start_playing(self.selected_game_id, self.level_manager.level)
+        
+        elif self.current_state == 'game_over':
+            # Game over ekranında herhangi bir yere tıklayınca seçime dön
+            self.current_state = 'game_selection'
+        
         elif self.current_state == 'game_info':
             if self.start_button_rect and self.start_button_rect.collidepoint(pos):
                 self.start_game(self.selected_game_id)
+        
         elif self.current_state == 'level_info':
-            # Tasarlanan bilgi ekranÄ±ndaki butonlara tÄ±kla
+            # Tasarlanan bilgi ekranındaki butonlara tıkla
             for b in self.level_info_buttons:
                 if b['rect'].collidepoint(pos):
                     act = b.get('action')
@@ -312,10 +321,11 @@ class Game:
                     elif act == 'back':
                         self.current_state = 'game_selection'
                     break
+        
         elif self.current_state == 'playing':
             if self.game_state.help_button_rect.collidepoint(pos):
                 self.game_state.help_mode = not self.game_state.help_mode
-            # Overlay buton aksiyonlarÄ±
+            # Overlay buton aksiyonları
             try:
                 for b in self.level_overlay_buttons:
                     if b['rect'].collidepoint(pos):
@@ -325,19 +335,14 @@ class Game:
                         elif act == 'back':
                             self.current_state = 'game_selection'
                         elif act == 'continue' or act == 'resume':
-                            # Åžimdilik no-op; ileride pause desteÄŸi eklenebilir
+                            # Şimdilik no-op; ileride pause desteği eklenebilir
                             pass
                         elif act == 'start_game':
-                            # Zaten oyun iÃ§indeyiz; no-op
+                            # Zaten oyun içindeyiz; no-op
                             pass
                         break
             except Exception:
                 pass
-        elif self.current_state in ['game_over', 'level_up']:
-            if self.current_state == 'game_over':
-                self.current_state = 'game_selection'
-            else:
-                self.current_state = 'playing'
 
     def _draw_wrapped_topleft(self, surface, text: str, font_size: int, x: int, y: int, color, wrap_width: int | None = None):
         """Sol-Ã¼st (tkinter NW) anchora gÃ¶re Ã§ok satÄ±rlÄ± metin Ã§izer.
@@ -533,10 +538,7 @@ class Game:
                             prev = len(self.item_base_surfaces)
                             found = _early_load_item_surfaces(other_id)
                             if found > prev:
-                                try:
-                                    self.level_manager.setup_level(int(row.get('level_number', 1)), game_id)
-                                except Exception:
-                                    pass
+                                # Sadece gÃ¶rselleri aldÄ±k, seviye numarasÄ±nÄ± deÄŸiÅŸtirmiyoruz!
                                 break
                     except Exception:
                         pass
@@ -1308,12 +1310,7 @@ class Game:
             return
             
         new_state = self.game_state.update(self.level_manager)
-        if new_state == 'level_up':
-            # Tebrikler ekranını atla, direkt sonraki seviye akışına gir
-            if not self._try_switch_to_level_info(self.selected_game_id, self.level_manager.level):
-                self._start_playing(self.selected_game_id, self.level_manager.level)
-            return
-        elif new_state:
+        if new_state:
             self.current_state = new_state
             return
 
