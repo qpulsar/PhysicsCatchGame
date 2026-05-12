@@ -10,6 +10,7 @@ class GameState:
         self.level = 1
         self.game_over = False
         self.help_mode = False
+        self.start_time = pygame.time.get_ticks()
         
         # Player state
         self.player = None

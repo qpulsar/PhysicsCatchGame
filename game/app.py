@@ -51,8 +51,7 @@ class Game:
         self.effect_sheet_correct_path = None
         self.effect_sheet_wrong_path = None
         # Efekt çalışma zamanı parametreleri
-        self.effect_sheet_correct_scale = 1.25
-        self.effect_sheet_wrong_scale = 1.25
+        self.effect_target_w = 0  # Hedef kare genişliği (basket_length * scale_pct / 100)
         self.effect_sheet_fps = 24
         # Designed level-info screen state
         self.level_info_data = None  # parsed JSON from editor
@@ -298,14 +297,41 @@ class Game:
                         self.current_state = 'game_selection'
                     break
         
-        elif self.current_state == 'level_up':
-            # Level up ekranında herhangi bir yere tıklayınca sonraki seviyeye geç
-            if not self._try_switch_to_level_info(self.selected_game_id, self.level_manager.level):
-                self._start_playing(self.selected_game_id, self.level_manager.level)
-        
-        elif self.current_state == 'game_over':
-            # Game over ekranında herhangi bir yere tıklayınca seçime dön
-            self.current_state = 'game_selection'
+        elif self.current_state in ('level_up', 'victory', 'game_over'):
+            # Tasarlanmış ekranlardaki butonları kontrol et
+            data = None
+            if self.current_state == 'level_up': data = self.level_info_data
+            elif self.current_state == 'victory': data = getattr(self, 'victory_data', None)
+            elif self.current_state == 'game_over': data = getattr(self, 'defeat_data', None)
+            
+            if data and isinstance(data, dict):
+                widgets = data.get('widgets') or []
+                for w in widgets:
+                    if w.get('type') == 'button':
+                        try:
+                            x = int(w.get('x', 0)); y = int(w.get('y', 0))
+                            fw = int(((w.get('sprite') or {}).get('frame') or {}).get('width', 200))
+                            fh = int(((w.get('sprite') or {}).get('frame') or {}).get('height', 54))
+                            if pygame.Rect(x, y, fw, fh).collidepoint(pos):
+                                act = str(w.get('action') or 'back')
+                                if act in ('restart_game', 'start_game', 'restart'):
+                                    self.start_game(self.selected_game_id)
+                                elif act in ('back', 'menu', 'exit'):
+                                    self.current_state = 'game_selection'
+                                elif act in ('next_level', 'continue', 'continue_level'):
+                                    if self.current_state == 'level_up':
+                                        self._start_playing(self.selected_game_id, self.level_manager.level)
+                                    else:
+                                        self.current_state = 'game_selection'
+                                return
+                        except Exception: continue
+
+            # Hiçbir butona basılmadıysa fallback davranışlar:
+            if self.current_state == 'level_up':
+                if not self._try_switch_to_level_info(self.selected_game_id, self.level_manager.level):
+                    self._start_playing(self.selected_game_id, self.level_manager.level)
+            elif self.current_state in ('game_over', 'victory'):
+                self.current_state = 'game_selection'
         
         elif self.current_state == 'game_info':
             if self.start_button_rect and self.start_button_rect.collidepoint(pos):
@@ -699,22 +725,10 @@ class Game:
             except Exception as e:
                 print(f"[AppDBG] Error loading DB effects: {e}")
 
-            # Ölçek hesapla: hedef genişlik = basket_length * (scale_pct/100)
-            def _calc_scale(sheet_path: str | None) -> float:
-                try:
-                    if not sheet_path or not os.path.exists(sheet_path):
-                        return 1.25
-                    img = pygame.image.load(sheet_path).convert_alpha()
-                    # Varsayılan olarak correct cols kullanılıyor, path'e göre ayırt edilebilir ama basitleştirilmiş:
-                    cols = self.effect_sheet_correct_cols if sheet_path == self.effect_sheet_correct_path else self.effect_sheet_wrong_cols
-                    frame_w = max(1, img.get_width() // cols)
-                    target_w = max(16, int(basket_length * scale_pct / 100.0))
-                    return max(0.1, target_w / float(frame_w))
-                except Exception:
-                    return 1.25
-
-            self.effect_sheet_correct_scale = _calc_scale(self.effect_sheet_correct_path)
-            self.effect_sheet_wrong_scale = _calc_scale(self.effect_sheet_wrong_path)
+            # Editördeki mantıkla aynı: target_w = basket_length * scale_pct / 100
+            # EffectManager her kareyi bu hedef genişliğe göre ayrı ayrı ölçekler
+            self.effect_target_w = max(16, int(basket_length * scale_pct / 100.0))
+            print(f"[EffectScale] BasketLen={basket_length} ScalePct={scale_pct} TargetW={self.effect_target_w}")
 
             # Ön-yükleme: ilk tetiklemede gecikmeyi azalt
             try:
@@ -904,22 +918,24 @@ class Game:
         except Exception:
             pass
         # SFX load
-        corr = settings_map.get('DoÄŸru SFX') or settings_map.get('sfx_correct')
-        wrong = settings_map.get('YanlÄ±ÅŸ SFX') or settings_map.get('sfx_wrong')
+        corr_rel = settings_map.get('Doğru SFX') or settings_map.get('sfx_correct')
+        wrong_rel = settings_map.get('Yanlış SFX') or settings_map.get('sfx_wrong')
         try:
+            corr = self._abs_project_path(corr_rel) if corr_rel else None
             if corr and os.path.exists(corr):
                 if not pygame.mixer.get_init():
                     pygame.mixer.init()
                 self.sfx_correct = pygame.mixer.Sound(corr)
         except Exception:
-            self.sfx_correct = None
+            pass
         try:
+            wrong = self._abs_project_path(wrong_rel) if wrong_rel else None
             if wrong and os.path.exists(wrong):
                 if not pygame.mixer.get_init():
                     pygame.mixer.init()
                 self.sfx_wrong = pygame.mixer.Sound(wrong)
         except Exception:
-            self.sfx_wrong = None
+            pass
         # Paddle length (Sepet UzunluÄŸu)
         try:
             paddle_len = settings_map.get('Sepet UzunluÄŸu') or settings_map.get('paddle_length') or settings_map.get('basket_length')
@@ -950,7 +966,8 @@ class Game:
             pass
         # Music override from overlay
         try:
-            music_path = settings_map.get('MÃ¼zik') or settings_map.get('music')
+            music_rel = data.get('music') or settings_map.get('Müzik') or settings_map.get('music')
+            music_path = self._abs_project_path(music_rel) if music_rel else None
             if music_path and os.path.exists(music_path):
                 if not pygame.mixer.get_init():
                     pygame.mixer.init()
@@ -1171,6 +1188,32 @@ class Game:
                     f_cfg = w.get('font') or {}
                     fsz = int(f_cfg.get('size') or 22)
                     fname = f_cfg.get('name') or f_cfg.get('family') or 'Arial'
+                    
+                    # Dinamik değişkenleri işle
+                    try:
+                        if '{' in txt and '}' in txt:
+                            # Zaman hesapla
+                            elapsed = (pygame.time.get_ticks() - self.game_state.start_time) // 1000
+                            minutes = elapsed // 60
+                            seconds = elapsed % 60
+                            time_str = f"{minutes:02d}:{seconds:02d}"
+                            
+                            caught = len(self.level_manager.caught_correct)
+                            total = len(self.level_manager.correct_items)
+                            
+                            replacements = {
+                                '{score}': str(self.game_state.score),
+                                '{level}': str(self.level_manager.level),
+                                '{time}': time_str,
+                                '{caught}': str(caught),
+                                '{total}': str(total),
+                                '{lives}': str(self.game_state.lives)
+                            }
+                            for placeholder, val in replacements.items():
+                                txt = txt.replace(placeholder, val)
+                    except Exception:
+                        pass
+                        
                     wrap_w = max(50, SCREEN_WIDTH - x - 40)
                     self._draw_wrapped_topleft(self.screen, txt, int(fsz*1.2), x, y, color, wrap_w, fname)
                 elif wtype in ('sprite', 'image'):
@@ -1320,8 +1363,22 @@ class Game:
         collision_state = self.check_collisions()
         if collision_state:
             self.current_state = collision_state
+            if collision_state == 'game_over':
+                # Yenilgi ekranı tasarımını yükle
+                self.defeat_data = self.db.get_screen(self.selected_game_id, 'defeat')
+            return
             
         self.remove_off_screen_items()
+        
+        # Zafer kontrolü (tüm seviyeler bitti mi?)
+        if self.level_manager.is_level_complete():
+            next_level = self.level_manager.level + 1
+            if not self.level_manager.db.get_level_data(self.selected_game_id, next_level):
+                # Başka seviye yoksa zafer ekranına geç
+                self.current_state = 'victory'
+                self.victory_data = self.db.get_screen(self.selected_game_id, 'victory')
+            else:
+                self.current_state = 'level_up'
 
     def draw(self):
         mouse_pos = pygame.mouse.get_pos()
@@ -1342,7 +1399,18 @@ class Game:
         elif self.current_state == 'level_up':
             self.ui_manager.draw_level_up(self.screen, self.level_manager.level, self.level_manager.target_category)
         elif self.current_state == 'game_over':
-            self.ui_manager.draw_game_over(self.screen, self.game_state.score)
+            # Eğer tasarlanmış bir defeat ekranı varsa onu kullan, yoksa fallback
+            if isinstance(getattr(self, 'defeat_data', None), dict):
+                self._render_designed_screen(self.defeat_data, self.per_game_bg_surface)
+            else:
+                self.ui_manager.draw_game_over(self.screen, self.game_state.score)
+        elif self.current_state == 'victory':
+            # Tasarlanmış zafer ekranını kullan (mecburi olmasa da önerilen)
+            if isinstance(getattr(self, 'victory_data', None), dict):
+                self._render_designed_screen(self.victory_data, self.per_game_bg_surface)
+            else:
+                # Fallback: level_up ekranı gibi bir tebrik mesajı
+                self.ui_manager.draw_level_up(self.screen, self.level_manager.level + 1, "OYUN TAMAMLANDI!")
         # splash screen is missing, we can add it or remove it from states
         
         pygame.display.flip()
@@ -1405,12 +1473,17 @@ class Game:
         hits = pygame.sprite.spritecollide(self.game_state.player, self.game_state.items, True)
         for hit in hits:
             cx = self.game_state.player.rect.centerx
-            cy = self.game_state.player.rect.centery - max(2, int(self.game_state.player.rect.height * 0.25))
+            cy = self.game_state.player.rect.top
+            eff_offset = (0, -int(self.game_state.player.rect.height / 2 + 20))
+            tw = getattr(self, 'effect_target_w', 0)
             
             if hit.item_type == self.level_manager.target_category:
                 points = 5 if self.game_state.help_mode else 10
                 self.game_state.score += points
                 self.level_manager.caught_correct.append(hit.text)
+                
+                # Zafer/Sonraki seviye kontrolü buraya taşınabilir veya update'de bırakılabilir
+                # Biz update() içinde yapmayı tercih ettik.
                 
                 # 1. Frame Sequence Effect (Yeni Sistem)
                 played = False
@@ -1419,9 +1492,9 @@ class Game:
                         played = self.effect_manager.trigger_effect_by_data(
                             self.effect_correct_data,
                             cx, cy,
-                            scale=self.effect_sheet_correct_scale, # Scale'i buradan alabiliriz veya datadan
+                            target_w=tw,
                             follow_rect=self.game_state.player.rect,
-                            offset=(0, -max(2, int(self.game_state.player.rect.height * 0.25)))
+                            offset=eff_offset
                         )
                     except Exception as e:
                         print(f"Frame effect error: {e}")
@@ -1434,10 +1507,11 @@ class Game:
                             played = self.effect_manager.trigger_sprite_sheet(
                                 self.effect_sheet_correct_path,
                                 cx, cy,
-                                scale=self.effect_sheet_correct_scale,
+                                cols=self.effect_sheet_correct_cols, rows=self.effect_sheet_correct_rows,
+                                target_w=tw,
                                 fps=self.effect_sheet_fps,
                                 follow_rect=self.game_state.player.rect,
-                                offset=(0, -max(2, int(self.game_state.player.rect.height * 0.25)))
+                                offset=eff_offset
                             )
                     except Exception:
                         played = False
@@ -1466,9 +1540,9 @@ class Game:
                         played = self.effect_manager.trigger_effect_by_data(
                             self.effect_wrong_data,
                             cx, cy,
-                            scale=self.effect_sheet_wrong_scale,
+                            target_w=tw,
                             follow_rect=self.game_state.player.rect,
-                            offset=(0, -max(2, int(self.game_state.player.rect.height * 0.25)))
+                            offset=eff_offset
                         )
                     except Exception as e:
                         print(f"Frame effect error (wrong): {e}")
@@ -1482,10 +1556,10 @@ class Game:
                                 self.effect_sheet_wrong_path,
                                 cx, cy,
                                 cols=self.effect_sheet_wrong_cols, rows=self.effect_sheet_wrong_rows,
-                                scale=self.effect_sheet_wrong_scale,
+                                target_w=tw,
                                 fps=self.effect_sheet_fps,
                                 follow_rect=self.game_state.player.rect,
-                                offset=(0, -max(2, int(self.game_state.player.rect.height * 0.25)))
+                                offset=eff_offset
                             )
                     except Exception:
                         played = False

@@ -391,6 +391,10 @@ class LevelService:
         """Delete a level by ID."""
         return self.db.delete_level(level_id)
 
+    def update_level_effects(self, level_id: int, correct_id: Optional[int], wrong_id: Optional[int]) -> bool:
+        """Update the visual effect IDs assigned to a level."""
+        return self.db.update_level_effect_ids(level_id, correct_id, wrong_id)
+
     def get_level_background_sprite_ids(self, level_id: int) -> List[int]:
         """Belirtilen seviye için arka plan sprite ID'lerini döndürür.
 

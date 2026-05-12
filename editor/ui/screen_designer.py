@@ -383,7 +383,22 @@ class ScreenDesignerWindow(tk.Toplevel):
         
         ttk.Label(right_panel, text="Özellikler Paneli", style="Subheader.TLabel").pack(anchor="w", pady=(0, 10))
 
-        # Scroll edilebilir özellikler alanı (ekran küçükse taşmaması için)
+        # --- Linter Alanı (Sabit, Sağ panelin altında) ---
+        linter_frame = ttk.LabelFrame(right_panel, text="Akıllı Hatırlatıcı", padding=5)
+        linter_frame.pack(side="bottom", fill="x", pady=(10, 0))
+        
+        # Linter metni için Text widget (tıklanabilir olması için)
+        self.linter_text = tk.Text(linter_frame, height=6, wrap="word", background="#2b2b2b", 
+                                   foreground="#FF9800", font=("Segoe UI", 9), borderwidth=0, cursor="arrow")
+        self.linter_text.pack(fill="x", expand=True)
+        self.linter_text.config(state="disabled")
+        
+        # Etiket tanımları
+        self.linter_text.tag_configure("link", foreground="#2196F3", underline=True)
+        self.linter_text.tag_bind("link", "<Enter>", lambda e: self.linter_text.config(cursor="hand2"))
+        self.linter_text.tag_bind("link", "<Leave>", lambda e: self.linter_text.config(cursor="arrow"))
+
+        # --- Özellikler Alanı (Scroll edilebilir) ---
         prop_canvas = tk.Canvas(right_panel, background="#2b2b2b", highlightthickness=0)
         prop_scrollbar = ttk.Scrollbar(right_panel, orient="vertical", command=prop_canvas.yview)
         self.prop_inner = ttk.Frame(prop_canvas)
@@ -394,23 +409,18 @@ class ScreenDesignerWindow(tk.Toplevel):
         )
         prop_window = prop_canvas.create_window((0, 0), window=self.prop_inner, anchor="nw")
         
-        # Canvas boyutuna uydur (Genişlik ve Yükseklik)
+        # Canvas boyutuna uydur
         def _on_prop_resize(event):
             canvas_width = event.width
-            canvas_height = event.height
-            # İçeriğin ihtiyaç duyduğu minimum yükseklik
-            req_height = self.prop_inner.winfo_reqheight()
-            # Canvas yüksekliği veya içerik yüksekliğinden büyük olanı al
-            new_height = max(canvas_height, req_height)
-            prop_canvas.itemconfig(prop_window, width=canvas_width, height=new_height)
+            prop_canvas.itemconfig(prop_window, width=canvas_width)
         
         prop_canvas.bind("<Configure>", _on_prop_resize)
         prop_canvas.configure(yscrollcommand=prop_scrollbar.set)
         
         prop_canvas.pack(side="left", fill="both", expand=True)
         prop_scrollbar.pack(side="right", fill="y")
-
-        # İçerik oluşturucular (Sağ panele eklenenler self.prop_inner içine gidecek)
+        
+        # Özellikler panelini oluştur
         self._build_property_panels(self.prop_inner)
 
     def _create_canvas_previews(self):
@@ -2258,13 +2268,18 @@ class ScreenDesignerWindow(tk.Toplevel):
             self.screen_service.upsert_screen(self.game_id, self.screen_name, self.screen_type, payload)
             
             # Eğer bu bir Level ekranıysa ve level_id biliniyorsa, efekt ID'lerini de güncelle
-            if (self.screen_type or "").lower() == "level" and self.level_id:
+            if (self.screen_type or "").lower() == "level" and getattr(self, "level_id", None):
                 # Efekt isimlerinden ID'leri bul
                 ok_name = self.level_effect_ok_display_var.get()
                 bad_name = self.level_effect_bad_display_var.get()
                 
                 ok_id = self._effect_name_to_id.get(ok_name)
                 bad_id = self._effect_name_to_id.get(bad_name)
+                
+                # Veritabanındaki levels tablosunu güncelle (Oyun motoru buradan okur)
+                if self.level_service:
+                    self.level_service.update_level_effects(self.level_id, ok_id, bad_id)
+                    print(f"[Designer] Level effects updated: OK={ok_id} ({ok_name}), BAD={bad_id} ({bad_name})")
                 
             # Küçük resim (thumbnail) oluştur ve kaydet
             self._save_thumbnail()
@@ -3175,6 +3190,13 @@ class ScreenDesignerWindow(tk.Toplevel):
         """Ekran tipine göre eksik olan temel düğmeleri/bileşenleri belirler."""
         missing = []
         actions = [it["props"].get("action") for it in self.items if it["type"] == "button"]
+        
+        # Mevcut etiketlerde kullanılan değişkenleri tara
+        all_label_texts = " ".join([it["props"].get("text", "") for it in self.items if it["type"] == "label"])
+        
+        def is_var_missing(var_name):
+            return f"{{{var_name}}}" not in all_label_texts
+
         name = (self.screen_name or "").lower()
         
         if name == "opening":
@@ -3186,21 +3208,130 @@ class ScreenDesignerWindow(tk.Toplevel):
         elif "victory" in name or "win" in name:
             if not any(a in actions for a in ["back", "next_level", "restart_game", "start_game"]):
                 missing.append("Menüye Dön veya Sonraki Seviye düğmesi")
+            
+            # Dinamik değişken kontrolleri
+            for v in ["score", "time", "caught", "total", "level"]:
+                if is_var_missing(v):
+                    missing.append(f"Değişken: {{{v}}}")
+                    
         elif "defeat" in name or "lose" in name or "game_over" in name:
             if not any(a in actions for a in ["back", "restart_game", "start_game"]):
                 missing.append("Menüye Dön veya Yeniden Başlat düğmesi")
-                
+            
+            # Dinamik değişken kontrolleri
+            for v in ["score", "time", "caught", "total"]:
+                if is_var_missing(v):
+                    missing.append(f"Değişken: {{{v}}}")
+                    
         return missing
 
-    def _run_linter(self):
-        """Linter'ı çalıştırır ve sağ paneldeki uyarı etiketini günceller."""
+    def _is_over_link(self, event):
+        """Mouse'un bir link üzerinde olup olmadığını kontrol eder."""
         try:
-            missing = self._get_missing_essentials()
-            if not missing:
-                self.linter_label.config(text="✅ Tüm temel bileşenler mevcut.", foreground="#4CAF50")
-            else:
-                txt = "⚠️ Eksik önerilen öğeler:\n" + "\n".join([f"• {m}" for m in missing])
-                self.linter_label.config(text=txt, foreground="#FF9800")
+            index = self.linter_text.index(f"@{event.x},{event.y}")
+            tags = self.linter_text.tag_names(index)
+            return "link" in tags
         except Exception:
-            pass
+            return False
+
+    def _add_missing_item(self, item_type: str):
+        """Eksik olan öğeyi otomatik olarak ekler."""
+        if item_type == "start_game":
+            self._add_button()
+            self.button_text_var.set("OYUNU BAŞLAT")
+            self.button_action_var.set("start_game")
+            self._apply_button_props()
+        elif item_type == "continue":
+            self._add_continue_button()
+        elif item_type == "restart":
+            self._add_button()
+            self.button_text_var.set("YENİDEN BAŞLAT")
+            self.button_action_var.set("restart_game")
+            self._apply_button_props()
+        elif item_type == "back":
+            self._add_button()
+            self.button_text_var.set("ANA MENÜYE DÖN")
+            self.button_action_var.set("back")
+            self._apply_button_props()
+        elif item_type.startswith("var_"):
+            var_name = item_type.replace("var_", "")
+            # Değişkenlere göre varsayılan metin ve konumlar
+            var_configs = {
+                "score":  ("PUAN: {score}", 400, 150),
+                "time":   ("SÜRE: {time}", 400, 200),
+                "caught": ("YAKALANAN: {caught}", 400, 250),
+                "total":  ("HEDEF: {total}", 400, 300),
+                "level":  ("SEVİYE: {level}", 400, 350)
+            }
+            
+            if var_name in var_configs:
+                txt, x, y = var_configs[var_name]
+                self._add_label()
+                
+                # Yeni eklenen öğeyi bul ve özelliklerini güncelle
+                it = self.selected_item
+                if it and it["type"] == "label":
+                    it["props"]["text"] = txt
+                    it["props"]["x"] = x
+                    it["props"]["y"] = y
+                    
+                    # Canvas koordinatlarını güncelle
+                    cx, cy = int(self._to_canvas(x)), int(self._to_canvas(y))
+                    self.canvas.coords(it["id"], cx, cy)
+                    
+                    # Özellikler panelindeki Text widget'ını güncelle
+                    self.label_text.delete("1.0", "end")
+                    self.label_text.insert("1.0", txt)
+                    
+                    # Değişiklikleri uygula
+                    self._apply_label_props()
+        
+        self._run_linter()
+
+    def _run_linter(self):
+        """Linter'ı çalıştırır ve sağ paneldeki uyarı alanını günceller."""
+        try:
+            if not hasattr(self, "linter_text"): return
+            
+            missing = self._get_missing_essentials()
+            self.linter_text.config(state="normal")
+            self.linter_text.delete("1.0", "end")
+            
+            if not missing:
+                self.linter_text.insert("end", "✅ Tüm temel bileşenler mevcut.")
+                self.linter_text.tag_add("success", "1.0", "end")
+                self.linter_text.tag_configure("success", foreground="#4CAF50")
+            else:
+                self.linter_text.insert("end", "⚠️ Eksik önerilen öğeler:\n")
+                for m in missing:
+                    self.linter_text.insert("end", f"• {m} ")
+                    
+                    # Aksiyona göre 'Ekle' butonu/linki koy
+                    link_id = None
+                    if "start_game" in m: link_id = "start_game"
+                    elif "Devam et" in m: link_id = "continue"
+                    elif "Yeniden Başlat" in m: link_id = "restart"
+                    elif "Menüye Dön" in m: link_id = "back"
+                    elif "{score}" in m: link_id = "var_score"
+                    elif "{time}" in m: link_id = "var_time"
+                    elif "{caught}" in m: link_id = "var_caught"
+                    elif "{total}" in m: link_id = "var_total"
+                    elif "{level}" in m: link_id = "var_level"
+                    
+                    if link_id:
+                        start_idx = self.linter_text.index("end-1c")
+                        self.linter_text.insert("end", "[OTOMATİK EKLE]")
+                        end_idx = self.linter_text.index("end-1c")
+                        
+                        tag_name = f"link_{link_id}_{start_idx.replace('.', '_')}"
+                        self.linter_text.tag_add("link", start_idx, end_idx)
+                        self.linter_text.tag_add(tag_name, start_idx, end_idx)
+                        self.linter_text.tag_bind(tag_name, "<Button-1>", 
+                                                 lambda e, lid=link_id: self._add_missing_item(lid))
+                    
+                    self.linter_text.insert("end", "\n")
+            
+            self.linter_text.config(state="disabled")
+        except Exception as e:
+            print(f"Linter error: {e}")
 
