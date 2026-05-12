@@ -9,9 +9,10 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Optional, Dict, List
-from PIL import Image, ImageTk
 import json
 import unicodedata
+import numpy as np
+from PIL import Image, ImageTk, ImageDraw, ImageChops, ImageFilter
 
 from ...core.models import Sprite, SpriteDefinition, Expression
 from ...core.services import SpriteService, ExpressionService, LevelService, GameService
@@ -273,7 +274,9 @@ class SpritesTab:
         Akış:
         - Seçili görseli alır (soldaki liste).
         - Kullanıcıdan kök ad (örn. "buton") ve buton sayısı (varsayılan 10) ister.
-        - Görseli N eşit dilime böler, her dilimde alfa kanalından bbox çıkarır.
+        - Görseldeki bağlantılı bileşenleri (objeleri) alfa kanalı üzerinden otomatik tespit eder.
+        - Kullanıcıdan kök ad (örn. "buton") ve buton sayısı (varsayılan 10) ister.
+        - Akıllı tespit (Flood-fill) ile her bir bağımsız sprite'ı bulur.
         - Kullanıcının ilk kabul/editle ettiği bölgeyi REFERANS kabul eder.
         - Sonraki bölgelerde, referansın yüksekliği ve dikey hizasını koruyarak,
           segment veya alfa merkezine göre kutuyu yatayda konumlandırır (rehberli tespit).
@@ -309,8 +312,8 @@ class SpritesTab:
             img = Image.open(abs_path).convert("RGBA")
             iw, ih = img.size
 
-            # Projeksiyon tabanlı ham tespit (satır/sütun bantları)
-            raw_props = self._detect_by_projections(img)
+            # Akıllı bağlantılı bileşen tespiti (Flood-fill + BBox)
+            raw_props = self._detect_smart(img)
             # İsteğe bağlı: kullanıcı bir sayı girdiyse ilk n adet ile sınırla
             if n_hint is not None and n_hint > 0:
                 raw_props = raw_props[:n_hint]
@@ -326,77 +329,32 @@ class SpritesTab:
             except Exception:
                 pass
 
-            # Rehberli tespit: kullanıcı referansı ile hizalama
-            ref_box: Optional[dict] = None  # {'x','y','width','height'}
+            # Tespit edilen bölgeleri tek tek kullanıcıya onaya sun
             saved = 0
             for rp in raw_props:
-                # Referans uygula: varsa aynı yükseklik ve y, yatayda merkezle
-                guided = dict(rp)
-                if ref_box and ref_box.get("width", 0) > 0 and ref_box.get("height", 0) > 0:
-                    # Yükseklik referanstan alınır; Y, bandın ortasına referans yüksekliği merkezlenerek oturtulur
-                    guided_h = int(ref_box["height"])  # type: ignore[index]
-                    row_y1 = int(rp.get('row_y1', 0)); row_y2 = int(rp.get('row_y2', ih))
-                    band_cy = (row_y1 + row_y2) // 2
-                    guided_y = int(band_cy - guided_h // 2)
-                    # X merkezini ham bbox merkezinden al; yoksa sütun merkezini kullan
-                    col_x1 = int(rp.get('col_x1', rp.get('seg_x1', 0)))
-                    col_x2 = int(rp.get('col_x2', rp.get('seg_x2', iw)))
-                    if rp.get("width", 0) > 0:
-                        cx = rp["x"] + rp["width"] // 2
-                    else:
-                        cx = (col_x1 + col_x2) // 2
-                    guided_w = int(ref_box["width"])   # type: ignore[index]
-                    guided_x = int(cx - guided_w // 2)
-                    guided = {
-                        "x": guided_x,
-                        "y": guided_y,
-                        "width": guided_w,
-                        "height": guided_h,
-                        "index": rp["index"],
-                    }
-                    # Kolon bandına yatay kısıtlama (taşmayı ve üstüste binmeyi önle)
-                    cx1 = int(rp.get('col_x1', guided['x']))
-                    cx2 = int(rp.get('col_x2', guided['x'] + guided['width']))
-                    if cx2 > cx1:
-                        if guided['x'] < cx1:
-                            guided['x'] = cx1
-                        if guided['x'] + guided['width'] > cx2:
-                            guided['width'] = max(1, cx2 - guided['x'])
-                # Sınırları kısıtla
-                guided = self._clamp_bbox(guided, iw, ih)
+                # Akıllı tespit sonucunu kullan (herhangi bir referansa zorlama yapma)
+                current_box = self._clamp_bbox(dict(rp), iw, ih)
 
-                action, edited = self._review_region_dialog(abs_path, guided)
+                action, edited = self._review_region_dialog(abs_path, current_box)
                 if action == "accept":
-                    final_box = guided
-                    name = f"{base}_{guided['index']}"
+                    final_box = current_box
+                    name = f"{base}_{rp['index']}"
                     try:
                         self.sprite_service.upsert_sprite_region(rel, name, final_box)
                         saved += 1
                     except Exception as e:
                         messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
-                    # Referansı güncelle
-                    ref_box = final_box
-                    # Overlay'i güncelle: mevcut referansa göre tüm kutuları yeniden çiz
-                    try:
-                        all_guided = [self._clamp_bbox(self._apply_ref_on_raw(r, ref_box, iw, ih), iw, ih) for r in raw_props]
-                        self._render_detection_overlay(all_guided, iw, ih)
-                    except Exception:
-                        pass
                 elif action == "edit" and edited:
-                    name = f"{base}_{guided['index']}"
+                    name = f"{base}_{rp['index']}"
                     try:
                         self.sprite_service.upsert_sprite_region(rel, name, edited)
                         saved += 1
                     except Exception as e:
                         messagebox.showerror("Hata", f"Kaydedilemedi: {e}")
-                    # Referansı güncelle (kullanıcının düzenlediği kutu en iyi referanstır)
-                    ref_box = edited
-                    try:
-                        all_guided = [self._clamp_bbox(self._apply_ref_on_raw(r, ref_box, iw, ih), iw, ih) for r in raw_props]
-                        self._render_detection_overlay(all_guided, iw, ih)
-                    except Exception:
-                        pass
-                # skip -> hiçbir şey yapma
+                elif action == "skip":
+                    continue
+                elif action == "cancel":
+                    break
 
             if saved > 0:
                 self._refresh_regions_list()
@@ -412,132 +370,149 @@ class SpritesTab:
             except Exception:
                 pass
 
-    def _apply_ref_on_raw(self, rp: dict, ref_box: Optional[dict], iw: int, ih: int) -> dict:
-        """Ham kutuya referans hizalamayı uygular; referans yoksa hamı döndürür.
 
-        Y, ilgili satır bandının ortasına referans yüksekliği merkezlenerek yerleştirilir; X, ham bbox/kolon merkezinden alınır.
-        """
-        guided = dict(rp)
-        if ref_box and ref_box.get("width", 0) > 0 and ref_box.get("height", 0) > 0:
-            guided_h = int(ref_box["height"])  # type: ignore[index]
-            row_y1 = int(rp.get('row_y1', 0)); row_y2 = int(rp.get('row_y2', ih))
-            band_cy = (row_y1 + row_y2) // 2
-            guided_y = int(band_cy - guided_h // 2)
-            col_x1 = int(rp.get('col_x1', rp.get('seg_x1', 0)))
-            col_x2 = int(rp.get('col_x2', rp.get('seg_x2', iw)))
-            if rp.get("width", 0) > 0:
-                cx = rp["x"] + rp["width"] // 2
-            else:
-                cx = (col_x1 + col_x2) // 2
-            guided_w = int(ref_box["width"])   # type: ignore[index]
-            guided_x = int(cx - guided_w // 2)
-            guided = {
-                "x": guided_x,
-                "y": guided_y,
-                "width": guided_w,
-                "height": guided_h,
-                "index": rp.get("index"),
-            }
-            # Kolon bandına yatay kısıtlama
-            cx1 = int(rp.get('col_x1', guided['x']))
-            cx2 = int(rp.get('col_x2', guided['x'] + guided['width']))
-            if cx2 > cx1:
-                if guided['x'] < cx1:
-                    guided['x'] = cx1
-                if guided['x'] + guided['width'] > cx2:
-                    guided['width'] = max(1, cx2 - guided['x'])
-        return guided
-
-    def _detect_by_projections(self, img: Image.Image) -> List[dict]:
-        """Alfa projeksiyonları ile satır ve sütun bantlarını bularak ham kutular döndürür.
-
-        Dönüş: [{'x','y','width','height','index','row_y1','row_y2','col_x1','col_x2'}]
-        Sıralama: üstten alta, soldan sağa.
+    def _detect_smart(self, img: Image.Image) -> List[dict]:
+        """Alpha kanalı üzerinden bağlantılı bileşenleri tespit eder ve birbirine çok yakın kutuları birleştirir.
+        
+        Gelişmiş Özellikler:
+        - Morfolojik Kapanma: Küçük boşlukları ve kopuk parçaları (parıltı vb.) birleştirir.
+        - Kutu Birleştirme: İç içe geçen veya birbirine değen bboxes'ları tek bir sprite olarak gruplar.
         """
         iw, ih = img.size
-        alpha = img.split()[3] if img.mode == 'RGBA' else img.convert('L')
-        px = alpha.load()
-        # 1) Yatay bantlar (satırlar)
-        bands: List[tuple[int,int]] = []
-        in_band = False; band_start = 0
-        for y in range(ih):
-            row_has = False
-            for x in range(iw):
-                if px[x, y] > 0:
-                    row_has = True; break
-            if row_has and not in_band:
-                in_band = True; band_start = y
-            elif not row_has and in_band:
-                if y - band_start >= 8:  # min yükseklik filtresi
-                    bands.append((band_start, y))
-                in_band = False
-        if in_band:
-            if ih - band_start >= 8:
-                bands.append((band_start, ih))
+        # 1. Alfa maskesini al
+        if img.mode == 'RGBA':
+            alpha = img.split()[3]
+        else:
+            alpha = img.convert('L')
+        
+        # Eşikleme (Threshold)
+        mask = alpha.point(lambda p: 255 if p > 35 else 0)
+        
+        # --- MORFOLOJİK İŞLEM: CLOSING ---
+        # Yakın parçaları birleştirmek için maskeyi biraz genişletip geri daraltıyoruz
+        # Bu, 'glow' veya 'parçacıklar' gibi kopuk duran kısımları ana gövdeye bağlar.
+        dilated = mask.filter(ImageFilter.MaxFilter(7)) # 7x7 genişletme
+        closed = dilated.filter(ImageFilter.MinFilter(5)) # 5x5 daraltma (net sonuç: +2px genişleme)
+        
+        bboxes = []
+        work_mask = closed.copy()
+        
+        # 2. Bağlantılı Bileşen Tespiti (Flood-fill)
+        while True:
+            curr_bbox = work_mask.getbbox()
+            if not curr_bbox: break
+            
+            start_pixel = None
+            found = False
+            for y in range(curr_bbox[1], curr_bbox[3]):
+                for x in range(curr_bbox[0], curr_bbox[2]):
+                    if work_mask.getpixel((x, y)) > 0:
+                        start_pixel = (x, y)
+                        found = True
+                        break
+                if found: break
+            if not start_pixel: break
+            
+            # Bileşeni çıkar
+            comp_mask = work_mask.copy()
+            ImageDraw.floodfill(work_mask, start_pixel, 0)
+            single_comp = ImageChops.subtract(comp_mask, work_mask)
+            
+            # Orijinal alfa kanalı üzerinde bu bileşenin gerçek sınırlarını bulalım
+            # Çünkü morfolojik işlem maskeyi biraz büyütmüş olabilir.
+            b = single_comp.getbbox()
+            if b:
+                # Orijinal maskeden bu bölgeyi kırpıp gerçek bbox alalım
+                actual_crop = mask.crop(b)
+                actual_bbox = actual_crop.getbbox()
+                if actual_bbox:
+                    # Koordinatları orijinal resme göre offsetle
+                    final_b = (
+                        b[0] + actual_bbox[0],
+                        b[1] + actual_bbox[1],
+                        b[0] + actual_bbox[2],
+                        b[1] + actual_bbox[3]
+                    )
+                    w = final_b[2] - final_b[0]
+                    h = final_b[3] - final_b[1]
+                    if w > 4 and h > 4:
+                        bboxes.append([final_b[0], final_b[1], final_b[2], final_b[3]])
+        
+        # 3. KUTU BİRLEŞTİRME (Merging Overlapping/Intersecting Bboxes)
+        # Bazen morfolojik işlem yetmezse, iç içe geçen kutuları manuel birleştiriyoruz.
+        def get_iou_or_overlap(b1, b2):
+            # Eğer biri diğerinin içindeyse veya çok yakınsa True
+            # [x1, y1, x2, y2]
+            # Biraz tolerans payı ekleyelim (5px)
+            t = 5
+            intersect_x1 = max(b1[0], b2[0]) - t
+            intersect_y1 = max(b1[1], b2[1]) - t
+            intersect_x2 = min(b1[2], b2[2]) + t
+            intersect_y2 = min(b1[3], b2[3]) + t
+            
+            if intersect_x2 > intersect_x1 and intersect_y2 > intersect_y1:
+                return True
+            return False
 
-        props: List[dict] = []
-        # 2) Her bant içinde dikey kolon kümeleri
-        for (y1, y2) in bands:
-            # Dikey projeksiyon
-            col_on = [False]*iw
-            for x in range(iw):
-                any_on = False
-                for y in range(y1, y2):
-                    if px[x, y] > 0:
-                        any_on = True; break
-                col_on[x] = any_on
-            # x aralıklarını çıkar (dar boşlukları birleştir)
-            gap_max = max(12, iw // 50)  # görsele göre ~%2 veya en az 12px
-            in_col = False; cx1 = 0; gap_run = 0
-            cols: List[tuple[int,int]] = []
-            for x in range(iw):
-                if col_on[x]:
-                    if not in_col:
-                        in_col = True; cx1 = x; gap_run = 0
-                    else:
-                        gap_run = 0  # içerideyken boşluk sıfırlanır
+        changed = True
+        while changed:
+            changed = False
+            new_bboxes = []
+            used = [False] * len(bboxes)
+            for i in range(len(bboxes)):
+                if used[i]: continue
+                current = bboxes[i]
+                used[i] = True
+                for j in range(i + 1, len(bboxes)):
+                    if not used[j] and get_iou_or_overlap(current, bboxes[j]):
+                        # Birleştir
+                        current = [
+                            min(current[0], bboxes[j][0]),
+                            min(current[1], bboxes[j][1]),
+                            max(current[2], bboxes[j][2]),
+                            max(current[3], bboxes[j][3])
+                        ]
+                        used[j] = True
+                        changed = True
+                new_bboxes.append(current)
+            bboxes = new_bboxes
+
+        # Sözlük yapısına dönüştür
+        final_props = []
+        for b in bboxes:
+            final_props.append({
+                'x': b[0], 'y': b[1], 'width': b[2]-b[0], 'height': b[3]-b[1]
+            })
+
+        # 4. Akıllı Sıralama (Satır bazlı)
+        final_props.sort(key=lambda b: b['y'])
+        
+        final_sorted = []
+        if final_props:
+            rows = []
+            curr_row = [final_props[0]]
+            for i in range(1, len(final_props)):
+                prev = curr_row[-1]
+                curr = final_props[i]
+                if curr['y'] < prev['y'] + prev['height'] * 0.7:
+                    curr_row.append(curr)
                 else:
-                    if in_col:
-                        gap_run += 1
-                        # İçerideyken küçük boşluklar devam ederse sütunu sürdür
-                        if gap_run > gap_max:
-                            # sütunu kapat
-                            end_x = x - gap_run + 1
-                            if end_x - cx1 >= 8:  # min genişlik filtresi
-                                cols.append((cx1, end_x))
-                            in_col = False; gap_run = 0
-            # Satır sonu için kapanmamış sütun
-            if in_col:
-                end_x = iw
-                if end_x - cx1 >= 8:
-                    cols.append((cx1, end_x))
-
-            # 3) Her sütun aralığında kesin bbox hesapla
-            for (x1, x2) in cols:
-                # Sınırlı bölgede bbox hesaplamak için küçük bir tarama
-                minx, miny, maxx, maxy = x2, y2, x1, y1
-                any_pix = False
-                for yy in range(y1, y2):
-                    for xx in range(x1, x2):
-                        if px[xx, yy] > 0:
-                            any_pix = True
-                            if xx < minx: minx = xx
-                            if yy < miny: miny = yy
-                            if xx > maxx: maxx = xx
-                            if yy > maxy: maxy = yy
-                if not any_pix:
-                    continue
-                w = max(1, maxx - minx + 1); h = max(1, maxy - miny + 1)
-                props.append({
-                    'x': int(minx), 'y': int(miny), 'width': int(w), 'height': int(h),
-                    'row_y1': int(y1), 'row_y2': int(y2), 'col_x1': int(x1), 'col_x2': int(x2),
-                })
-
-        # 4) Sırala ve index ver
-        props.sort(key=lambda b: (b['y'], b['x']))
-        for i, b in enumerate(props, start=1):
+                    rows.append(curr_row)
+                    curr_row = [curr]
+            rows.append(curr_row)
+            
+            for r in rows:
+                r.sort(key=lambda b: b['x'])
+                final_sorted.extend(r)
+        
+        for i, b in enumerate(final_sorted, start=1):
             b['index'] = i
-        return props
+            b['row_y1'] = b['y']
+            b['row_y2'] = b['y'] + b['height']
+            b['col_x1'] = b['x']
+            b['col_x2'] = b['x'] + b['width']
+            
+        return final_sorted
 
     def _open_detection_overlay(self, abs_image_path: str, iw: int, ih: int) -> None:
         """Tam ekran bir overlay penceresi açar ve sprite sheet'i çizer."""

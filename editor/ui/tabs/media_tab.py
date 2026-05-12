@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import Dict, Optional, List
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 from ...utils import format_filetypes_for_dialog
 
 # Pygame is used only for audio preview (lazy init)
@@ -430,42 +430,58 @@ class MediaTab:
             self._render_font_preview(path)
 
     def _render_font_preview(self, path: str) -> None:
-        """Render a sample text using the font at path onto the preview canvas."""
+        """Render a sample text using the font at path onto the preview canvas with a nice background."""
         if not _HAVE_PYGAME or not self._ensure_audio_ready():
             self.preview_canvas.delete("all")
             self.preview_canvas.create_text(250, 130, text="[Pygame Font Modülü Yüklü Değil]", fill="red")
             return
             
         try:
-            from PIL import Image, ImageTk
-            import pygame
-            
-            # Sample text
-            text = "ABC abc 123 !@#"
-            
-            # Pygame render
-            pg_font = pygame.font.Font(path, 48)
-            surf = pg_font.render(text, True, (0, 0, 0)) # Siyah metin (canvas beyaz)
-            
-            # Surface -> PIL
-            data = pygame.image.tostring(surf, "RGB")
-            img = Image.frombytes("RGB", surf.get_size(), data)
-            
-            # Canvas center
+            # Canvas dimensions
+            self.preview_canvas.update_idletasks()
             cw = self.preview_canvas.winfo_width()
             ch = self.preview_canvas.winfo_height()
-            if cw < 10: cw = 500
-            if ch < 10: ch = 260
+            if cw < 50: cw, ch = 500, 260
+
+            # 1. Create Gradient Background Image
+            top_color = (45, 49, 58)
+            bottom_color = (20, 22, 26)
+            bg_img = Image.new('RGB', (cw, ch))
+            draw = ImageDraw.Draw(bg_img)
+            for y in range(ch):
+                r = int(top_color[0] + (bottom_color[0] - top_color[0]) * (y / ch))
+                g = int(top_color[1] + (bottom_color[1] - top_color[1]) * (y / ch))
+                b = int(top_color[2] + (bottom_color[2] - top_color[2]) * (y / ch))
+                draw.line([(0, y), (cw, y)], fill=(r, g, b))
+
+            # 2. Render Text
+            # Turkish characters support
+            sample_text = "ABC abc 123 !@#\nPijamalı hasta, yağız şoföre çabucak güvendi."
+            pg_font = pygame.font.Font(path, 32)
             
-            # Scale if too wide
-            iw, ih = img.size
-            if iw > cw - 40:
-                scale = (cw - 40) / iw
-                img = img.resize((int(iw * scale), int(ih * scale)), Image.LANCZOS)
-            
-            photo = ImageTk.PhotoImage(img)
+            y_offset = 40
+            lines = sample_text.split('\n')
+            for line in lines:
+                # Render with WHITE text for visibility on dark background
+                surf = pg_font.render(line, True, (255, 255, 255))
+                
+                # Surface -> PIL (RGBA for transparency)
+                data = pygame.image.tostring(surf, "RGBA")
+                txt_img = Image.frombytes("RGBA", surf.get_size(), data)
+                
+                tw, th = txt_img.size
+                if tw > cw - 40:
+                    scale = (cw - 40) / tw
+                    txt_img = txt_img.resize((int(tw * scale), int(th * scale)), Image.LANCZOS)
+                    tw, th = txt_img.size
+                
+                # Paste using alpha channel
+                bg_img.paste(txt_img, ((cw - tw) // 2, y_offset), txt_img)
+                y_offset += th + 20
+
+            photo = ImageTk.PhotoImage(bg_img)
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_image(cw//2, ch//2, anchor="center", image=photo)
+            self.preview_canvas.create_image(0, 0, anchor="nw", image=photo)
             self._preview_img_ref = photo # GC protection
             
         except Exception as e:
