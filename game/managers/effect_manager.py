@@ -116,6 +116,7 @@ class EffectManager:
         # Sprite-sheet effect state
         self._sheet_cache: Dict[str, pygame.Surface] = {}
         self._active_sheet_anims: List["_SheetAnimState"] = []
+        self._active_frame_anims: List["_FrameAnimState"] = []
 
     class _SheetAnimState:
         """Internal runtime for a sprite-sheet animation.
@@ -222,21 +223,20 @@ class EffectManager:
         self.confetti_particles = [ConfettiParticle(x, y) for _ in range(count)]
         self.confetti_timer = 25
     
-    def trigger_sad_effect(self, x: float, y: float) -> None:
-        """Trigger a sad effect at the specified position.
-        
-        Args:
-            x: The x-coordinate where the effect should appear.
-            y: The y-coordinate where the effect should appear.
-        """
         self.sad_effect = SadEffect(x, y)
         self.sad_timer = 30
+
+    def trigger_basket_shake(self, player) -> None:
+        """Sepette sarsıntı animasyonu tetikler."""
+        if hasattr(player, 'apply_shake'):
+            player.apply_shake(intensity=8, duration=15)
     
     def update(self) -> None:
         """Update all active effects."""
         self._update_confetti()
         self._update_sad_effect()
         self._update_sheet_anims()
+        self._update_frame_anims()
     
     def _update_confetti(self) -> None:
         """Update the confetti effect."""
@@ -265,6 +265,7 @@ class EffectManager:
         self._draw_confetti(surface)
         self._draw_sad_effect(surface)
         self._draw_sheet_anims(surface)
+        self._draw_frame_anims(surface)
     
     def _draw_confetti(self, surface: pygame.Surface) -> None:
         """Draw all confetti particles."""
@@ -278,11 +279,10 @@ class EffectManager:
     
     def clear_effects(self) -> None:
         """Clear all active effects."""
-        self.confetti_particles.clear()
-        self.sad_effect = None
         self.confetti_timer = 0
         self.sad_timer = 0
         self._active_sheet_anims.clear()
+        self._active_frame_anims.clear()
 
     # --- Sprite sheet public API ---
     def trigger_sprite_sheet(self, sheet_path: str, x: float, y: float, *, cols: int = 6, rows: int = 5, scale: float = 1.0, fps: int = 24, follow_rect: Optional[pygame.Rect] = None, offset: Tuple[int, int] | None = None) -> bool:
@@ -382,7 +382,7 @@ class EffectManager:
                     follow_rect=follow_rect, 
                     offset=offset
                 )
-                self._active_sheet_anims.append(anim) # Using the same list for update loop
+                self._active_frame_anims.append(anim)
                 return True
                 
             return False
@@ -407,3 +407,18 @@ class EffectManager:
                 anim.draw(surface)
             except Exception:
                 continue
+
+    def _update_frame_anims(self) -> None:
+        alive = []
+        for anim in self._active_frame_anims:
+            try:
+                if anim.update():
+                    alive.append(anim)
+            except Exception: continue
+        self._active_frame_anims = alive
+
+    def _draw_frame_anims(self, surface: pygame.Surface) -> None:
+        for anim in self._active_frame_anims:
+            try:
+                anim.draw(surface)
+            except Exception: continue

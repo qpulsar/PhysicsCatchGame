@@ -126,6 +126,14 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._effect_image_to_name: Dict[str, str] = {}
         self._effect_name_to_id: Dict[str, int] = {}
         
+        # Mini önizleme durumları
+        self._mini_basket_img_ref = None
+        self._mini_frames_ok = []
+        self._mini_frames_bad = []
+        self._mini_ok_index = 0
+        self._mini_bad_index = 0
+        self._mini_effect_timer = None
+
         self._updating_sidebar = False  # Flag to prevent loops/overwrite during selection
 
         # UI Değişkenleri (Erken Tanım)
@@ -616,6 +624,32 @@ class ScreenDesignerWindow(tk.Toplevel):
         ttk.Entry(f_fps, textvariable=self.level_effect_fps_var, width=5).pack(side=tk.LEFT, padx=5)
         ttk.Label(f_fps, text="Ölçek %:").pack(side=tk.LEFT)
         ttk.Entry(f_fps, textvariable=self.level_effect_scale_var, width=5).pack(side=tk.LEFT, padx=5)
+
+        # --- Canlı Önizleme (Mini) ---
+        self.mini_preview_frame = ttk.LabelFrame(lt_basket, text="Canlı Önizleme", padding=5)
+        self.mini_preview_frame.pack(fill="x", pady=10)
+
+        # Sepet
+        self.mini_basket_canvas = tk.Canvas(self.mini_preview_frame, height=70, bg="#1a1a1a", highlightthickness=0)
+        self.mini_basket_canvas.pack(fill="x", pady=2)
+
+        # Efektler Row
+        eff_mini_row = ttk.Frame(self.mini_preview_frame)
+        eff_mini_row.pack(fill="x", pady=5)
+
+        # Doğru
+        f_ok_mini = ttk.Frame(eff_mini_row)
+        f_ok_mini.pack(side=tk.LEFT, expand=True, fill="both")
+        ttk.Label(f_ok_mini, text="Doğru", font=("Segoe UI", 8), foreground="#4CAF50").pack()
+        self.mini_ok_canvas = tk.Canvas(f_ok_mini, width=90, height=90, bg="#1a1a1a", highlightthickness=0)
+        self.mini_ok_canvas.pack(pady=2)
+
+        # Yanlış
+        f_bad_mini = ttk.Frame(eff_mini_row)
+        f_bad_mini.pack(side=tk.LEFT, expand=True, fill="both")
+        ttk.Label(f_bad_mini, text="Yanlış", font=("Segoe UI", 8), foreground="#F44336").pack()
+        self.mini_bad_canvas = tk.Canvas(f_bad_mini, width=90, height=90, bg="#1a1a1a", highlightthickness=0)
+        self.mini_bad_canvas.pack(pady=2)
         
         # Ses
         self.level_sfx_ok_combo = ttk.Combobox(_frm(lt_sfx, "Doğru Sesi:"), 
@@ -650,7 +684,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         # BG
         ttk.Button(lt_bg, text="Nesne Resimleri Seç", command=self._open_bg_region_picker).pack(fill="x", pady=5)
         self.level_bg_preview_frame = ttk.LabelFrame(lt_bg, text="Seçili Bölgeler")
-        self.level_bg_preview_frame.pack(fill="x", expand=True)
+        self.level_bg_preview_frame.pack(fill="x", pady=5)
         self._refresh_bg_region_preview()
 
         # Initial Visibility
@@ -967,20 +1001,13 @@ class ScreenDesignerWindow(tk.Toplevel):
             ttk.Label(self.level_bg_preview_frame, text="Seçimler yüklenemedi.").pack(anchor="w")
             return
 
-        wrap = ttk.Frame(self.level_bg_preview_frame); wrap.pack(fill="x")
-        # referansları sakla
+        # Kapsayıcı frame: dikey liste düzeni
+        wrap = ttk.Frame(self.level_bg_preview_frame)
+        wrap.pack(fill="x", expand=True)
+        
         self._bg_prev_refs: List[ImageTk.PhotoImage] = []
 
-        def abs_project(rel: str) -> Optional[str]:
-            if not rel:
-                return None
-            p = rel.replace('\\','/').strip()
-            if os.path.isabs(p):
-                return p
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
-            return os.path.join(project_root, p)
-
-        row = ttk.Frame(wrap); row.pack(fill="x")
+        # Liste öğelerini oluştur
         for reg in show:
             try:
                 rid = int(reg.get('id', 0))
@@ -988,7 +1015,8 @@ class ScreenDesignerWindow(tk.Toplevel):
                 name = str(reg.get("name") or "")
                 x = int(reg.get("x", 0)); y = int(reg.get("y", 0))
                 w = int(reg.get("width", 0)); h = int(reg.get("height", 0))
-                abs_path = abs_project(img_rel)
+                
+                abs_path = self._abs_assets_path(img_rel)
                 thumb = None
                 if abs_path and os.path.isfile(abs_path) and w > 0 and h > 0:
                     pil = Image.open(abs_path)
@@ -997,28 +1025,33 @@ class ScreenDesignerWindow(tk.Toplevel):
                     x2 = max(0, min(iw, x + w)); y2 = max(0, min(ih, y + h))
                     if x2 > x1 and y2 > y1:
                         pil_crop = pil.crop((x1, y1, x2, y2))
-                        # küçük önizleme 64x48
-                        tw, th = 64, 48
+                        # Liste görünümü için uygun önizleme boyutu (48x36)
+                        tw, th = 48, 36
                         scale = min(tw / max(1, pil_crop.width), th / max(1, pil_crop.height))
                         rz = (max(1, int(pil_crop.width * scale)), max(1, int(pil_crop.height * scale)))
                         pil_thumb = pil_crop.resize(rz, Image.LANCZOS)
                         thumb = ImageTk.PhotoImage(pil_thumb)
                         self._bg_prev_refs.append(thumb)
-                cell = ttk.Frame(row, padding=(4,2)); cell.pack(side=tk.LEFT)
+
+                # Her bir öğe için tam genişlikte bir satır (cell)
+                cell = ttk.Frame(wrap, padding=(5, 5))
+                cell.pack(fill="x")
+
                 if thumb:
-                    tk.Label(cell, image=thumb).pack()
-                # Silme butonu: bu bölgeyi seçili listeden kaldırır
-                btn_row = ttk.Frame(cell); btn_row.pack(fill="x")
-                ttk.Label(btn_row, text=name).pack(side=tk.LEFT)
+                    tk.Label(cell, image=thumb, background="#1e1e1e").pack(side=tk.LEFT, padx=(0, 10))
+                
+                # Bölge ismi
+                ttk.Label(cell, text=name, font=("Segoe UI", 9, "bold"), anchor="w").pack(side=tk.LEFT, fill="x", expand=True)
+
                 def _do_remove(rid_val: int = rid):
                     try:
-                        level_id = getattr(self, 'level_id', None)
-                        if not (self.level_service and level_id):
+                        level_id_inner = getattr(self, 'level_id', None)
+                        if not (self.level_service and level_id_inner):
                             return
-                        current = list(self.level_service.get_level_background_region_ids(level_id))  # type: ignore[attr-defined]
+                        current = list(self.level_service.get_level_background_region_ids(level_id_inner))  # type: ignore[attr-defined]
                         if rid_val in current:
                             new_list = [x for x in current if x != rid_val]
-                            self.level_service.set_level_background_region_ids(level_id, new_list)  # type: ignore[attr-defined]
+                            self.level_service.set_level_background_region_ids(level_id_inner, new_list)  # type: ignore[attr-defined]
                             # UI yenile
                             self._refresh_bg_region_preview()
                             self._update_item_bg_preview()
@@ -1027,7 +1060,13 @@ class ScreenDesignerWindow(tk.Toplevel):
                             messagebox.showerror("Hata", f"Bölge silinemedi: {e}")
                         except Exception:
                             pass
-                ttk.Button(btn_row, text="Sil", width=4, command=_do_remove).pack(side=tk.RIGHT, padx=(6,0))
+
+                # Silme butonu
+                ttk.Button(cell, text="Sil", width=6, command=_do_remove).pack(side=tk.RIGHT, padx=5)
+                
+                # Ayırıcı çizgi
+                ttk.Separator(wrap, orient="horizontal").pack(fill="x", padx=5)
+
             except Exception:
                 continue
 
@@ -2691,6 +2730,18 @@ class ScreenDesignerWindow(tk.Toplevel):
             self.canvas.itemconfigure(self._basket_preview_id, image=self._basket_preview_img_ref, state="normal")
             self.canvas.tag_raise(self._basket_preview_id) # Diğer her şeyin üzerinde olsun
 
+            # Mini Önizleme
+            try:
+                mw, mh = 280, 70
+                m_scale = min(mw/max(1, pil_crop.width), mh/max(1, pil_crop.height))
+                mnw, mnh = int(pil_crop.width * m_scale), int(pil_crop.height * m_scale)
+                img_mini = pil_crop.resize((mnw, mnh), Image.LANCZOS)
+                self._mini_basket_img_ref = ImageTk.PhotoImage(img_mini)
+                self.mini_basket_canvas.delete("all")
+                self.mini_basket_canvas.create_image(mw//2, mh//2, image=self._mini_basket_img_ref)
+            except Exception:
+                pass
+
         except Exception as e:
             print(f"Error updating basket preview: {e}")
             self.canvas.itemconfigure(self._basket_preview_id, state="hidden")
@@ -2781,8 +2832,14 @@ class ScreenDesignerWindow(tk.Toplevel):
             return self._slice_effect_sheet(img_rel)
 
         # Frame listelerini hazırla (önce parametre tabanlı, sonra fallback)
-        self._effect_frames_ok = _build_frames_from_params(ok_name, ok_rel) if (ok_name or ok_rel) else []
-        self._effect_frames_bad = _build_frames_from_params(bad_name, bad_rel) if (bad_name or bad_rel) else []
+        self._effect_frames_ok = self._produce_effect_frames(ok_name, ok_rel, None)
+        self._effect_frames_bad = self._produce_effect_frames(bad_name, bad_rel, None)
+
+        # Mini önizleme için sabit boyutta kareler hazırla (80x80)
+        self._mini_frames_ok = self._produce_effect_frames(ok_name, ok_rel, 80)
+        self._mini_frames_bad = self._produce_effect_frames(bad_name, bad_rel, 80)
+        self._mini_ok_index = 0
+        self._mini_bad_index = 0
 
         # Hiçbiri yoksa gizle ve çık
         if not self._effect_frames_ok and not self._effect_frames_bad:
@@ -2804,9 +2861,98 @@ class ScreenDesignerWindow(tk.Toplevel):
         # Konumu sepetin üstüne al ve başlat
         self._position_effect_over_basket()
         self._schedule_next_effect_frame()
+        self._schedule_mini_effect_frame()
+
+    def _produce_effect_frames(self, name: str, rel_path: str, target_w: Optional[int] = None) -> list[ImageTk.PhotoImage]:
+        """Efekt ismine ve yoluna göre kare listesi üretir. target_w None ise kanvas ölçeğine göre, değilse sabit boyutta üretir."""
+        params = self._effect_name_to_params.get(name)
+        img_rel = ""
+        frames_conf = []
+        if params:
+            img_rel = (params.get("image_path") or "").strip()
+            frames_conf = params.get("frames") or []
+        
+        if not img_rel:
+            img_rel = rel_path
+        
+        if not img_rel:
+            return []
+
+        if not frames_conf:
+            return self._slice_effect_sheet(img_rel, target_w)
+
+        # Parametre tabanlı kare üretimi
+        abs_path = self._abs_assets_path(img_rel)
+        if not abs_path or not os.path.isfile(abs_path):
+            return []
+            
+        try:
+            sheet = Image.open(abs_path)
+            # Hedef boyut
+            if target_w is None:
+                try:
+                    basket_len = max(1, int(self.level_basket_len_var.get() or "128"))
+                    scale_pct = max(10, min(200, int(self.level_effect_scale_var.get() or "60")))
+                    target_w = max(16, int(self._to_canvas(int(basket_len * scale_pct / 100.0))))
+                except:
+                    target_w = 64
+
+            frames: list[ImageTk.PhotoImage] = []
+            for fr in frames_conf:
+                try:
+                    x, y, w, h = int(fr.get("x", 0)), int(fr.get("y", 0)), int(fr.get("w", 0)), int(fr.get("h", 0))
+                    if w <= 0 or h <= 0: continue
+                    crop = sheet.crop((x, y, x + w, y + h))
+                    scale = target_w / max(1, crop.width)
+                    rw, rh = max(1, int(crop.width * scale)), max(1, int(crop.height * scale))
+                    crop = crop.resize((rw, rh), Image.LANCZOS)
+                    frames.append(ImageTk.PhotoImage(crop))
+                except: continue
+            return frames or self._slice_effect_sheet(img_rel, target_w)
+        except:
+            return []
+
+    def _schedule_mini_effect_frame(self) -> None:
+        """Mini önizleme kanvaslarındaki animasyonu ilerletir."""
+        self._stop_mini_effect_preview()
+        
+        # Doğru Efekt
+        if self._mini_frames_ok:
+            try:
+                img = self._mini_frames_ok[self._mini_ok_index % len(self._mini_frames_ok)]
+                self.mini_ok_canvas.delete("img")
+                self.mini_ok_canvas.create_image(45, 45, image=img, tags="img")
+                self._mini_ok_index = (self._mini_ok_index + 1) % len(self._mini_frames_ok)
+            except Exception: pass
+            
+        # Yanlış Efekt
+        if self._mini_frames_bad:
+            try:
+                img = self._mini_frames_bad[self._mini_bad_index % len(self._mini_frames_bad)]
+                self.mini_bad_canvas.delete("img")
+                self.mini_bad_canvas.create_image(45, 45, image=img, tags="img")
+                self._mini_bad_index = (self._mini_bad_index + 1) % len(self._mini_frames_bad)
+            except Exception: pass
+
+        # FPS'e göre zamanla
+        try:
+            fps = int(self.level_effect_fps_var.get() or "30")
+        except: fps = 30
+        delay = max(16, int(1000 / max(5, min(60, fps))))
+        self._mini_effect_timer = self.after(delay, self._schedule_mini_effect_frame)
+
+    def _stop_mini_effect_preview(self) -> None:
+        """Mini efekt zamanlayıcısını durdurur."""
+        try:
+            if self._mini_effect_timer is not None:
+                self.after_cancel(self._mini_effect_timer)
+        except: pass
+        finally:
+            self._mini_effect_timer = None
 
     def _stop_effect_preview(self) -> None:
         """Efekt önizleme zamanlayıcısını durdurur ve mevcut kareyi saklı tutar."""
+        self._stop_mini_effect_preview()
         try:
             if self._effect_timer is not None:
                 self.after_cancel(self._effect_timer)
@@ -2839,11 +2985,11 @@ class ScreenDesignerWindow(tk.Toplevel):
         except Exception:
             pass
 
-    def _slice_effect_sheet(self, rel_path: str) -> list[ImageTk.PhotoImage]:
+    def _slice_effect_sheet(self, rel_path: str, target_w: Optional[int] = None) -> list[ImageTk.PhotoImage]:
         """Verilen görsel yolundaki 6x5 efekt sheet'ini karelere böler ve `PhotoImage` listesi döndürür.
 
         - Kare sayısı 30 (6 sütun x 5 satır) varsayılır.
-        - Kareler, sepetin genişliğine yakın oranda ölçeklenir (uzunluğun %scale'i).
+        - target_w verilmezse sepetin genişliğine yakın oranda ölçeklenir.
         """
         frames: list[ImageTk.PhotoImage] = []
         try:
@@ -2859,17 +3005,14 @@ class ScreenDesignerWindow(tk.Toplevel):
             cw = sw // cols
             ch = sh // rows
 
-            # Hedef boyut: sepet uzunluğunun %scale'i; yükseklik oranı korunur
-            try:
-                basket_len = max(1, int(self.level_basket_len_var.get() or "128"))
-            except Exception:
-                basket_len = 128
-            try:
-                scale_pct = int(self.level_effect_scale_var.get() or "60")
-            except Exception:
-                scale_pct = 60
-            scale_pct = max(10, min(200, scale_pct))
-            target_w = max(16, int(self._to_canvas(int(basket_len * scale_pct / 100.0))))
+            # Hedef boyut hesapla
+            if target_w is None:
+                try:
+                    basket_len = max(1, int(self.level_basket_len_var.get() or "128"))
+                    scale_pct = max(10, min(200, int(self.level_effect_scale_var.get() or "60")))
+                    target_w = max(16, int(self._to_canvas(int(basket_len * scale_pct / 100.0))))
+                except:
+                    target_w = 64
 
             for r in range(rows):
                 for c in range(cols):

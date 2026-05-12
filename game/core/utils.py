@@ -25,12 +25,48 @@ def get_resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-def draw_text(surf, text, size, x, y, color, wrap_width=None):
-    # Sistem fontlarını dene (Verdana, Arial daha okunaklıdır)
+def load_font(name: str | None, size: int) -> pygame.font.Font:
+    """Sistem fontlarını veya assets/fonts altındaki özel TTF dosyalarını yükler."""
+    # Varsayılanlar
+    default_names = ['Verdana', 'Arial', 'sans-serif']
+    
+    # 1. Eğer font adı verilmemişse veya Arial ise sistem varsayılanını kullan
+    if not name or name == "Arial":
+        try:
+            return pygame.font.SysFont(default_names, size)
+        except:
+            return pygame.font.Font(None, size)
+
+    # 2. Özel TTF dosyasını kontrol et (assets/fonts)
+    # Proje kök dizini (game/core/utils.py -> game/core -> game -> root)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    fonts_dir = os.path.join(project_root, 'assets', 'fonts')
+    
+    # Dosya adını temizle ve .ttf ekle (yoksa)
+    clean_name = name
+    if not clean_name.lower().endswith('.ttf'):
+        clean_name += '.ttf'
+    
+    # Tam yolu oluştur
+    font_path = os.path.join(fonts_dir, clean_name)
+    
+    if os.path.isfile(font_path):
+        try:
+            return pygame.font.Font(font_path, size)
+        except Exception as e:
+            print(f"[Font] Özel font yüklenemedi ({clean_name}): {e}")
+            
+    # 3. Sistem fontu olarak dene
     try:
-        font = pygame.font.SysFont(['Verdana', 'Arial', 'sans-serif'], size)
+        # Öncelik kendi ismi, sonra yedekler
+        return pygame.font.SysFont([name] + default_names, size)
     except:
-        font = pygame.font.Font(None, size)
+        return pygame.font.Font(None, size)
+
+
+def draw_text(surf, text, size, x, y, color, wrap_width=None, font_name=None):
+    # Fontu yükle
+    font = load_font(font_name, size)
     
     if wrap_width:
         words = str(text).split(' ')

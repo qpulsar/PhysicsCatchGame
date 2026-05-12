@@ -40,6 +40,16 @@ class LevelDatabase:
             )
             return cursor.fetchone()
 
+    def get_game_settings(self, game_id: int) -> Dict[str, str]:
+        """Oyunun genel ayarlarını (varsayılan hız, oran vb.) döndürür."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT key, value FROM game_settings WHERE game_id = ?', (game_id,))
+                return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception:
+            return {}
+
     def get_expressions_for_level(self, level_id: int) -> List[sqlite3.Row]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -151,20 +161,26 @@ class LevelManager:
         self.spawn_ready = False
         
         # ----------------------------------------------------------------------
-        # FIX: Seviye ayarlarını doğrudan level_data'dan al.
-        # Global ayarlar (game_settings) yerine, her seviyenin kendi tasarımını kullan.
+        # Seviye ayarlarını uygula: Level-specific > Game Default > Hardcoded
         # ----------------------------------------------------------------------
         try:
-            # Veritabanından gelen değerleri güvenli bir şekilde al ve dönüştür
-            self.item_speed = float(level_data['item_speed']) if level_data['item_speed'] is not None else 3.0
-            self.max_items_on_screen = int(level_data['max_items_on_screen']) if level_data['max_items_on_screen'] is not None else 5
-            self.wrong_answer_percentage = int(level_data['wrong_answer_percentage']) if level_data['wrong_answer_percentage'] is not None else 40
+            gs = self.db.get_game_settings(game_id)
+            
+            def _get_f(row, key, gs_key, default):
+                if key in row.keys() and row[key] is not None: return float(row[key])
+                return float(gs.get(gs_key) or default)
+                
+            def _get_i(row, key, gs_key, default):
+                if key in row.keys() and row[key] is not None: return int(row[key])
+                return int(gs.get(gs_key) or default)
+
+            self.item_speed = _get_f(level_data, 'item_speed', 'default_item_speed', 3.0)
+            self.max_items_on_screen = _get_i(level_data, 'max_items_on_screen', 'default_max_items', 5)
+            self.wrong_answer_percentage = _get_i(level_data, 'wrong_answer_percentage', 'default_wrong_percentage', 40)
             
             # Sınır kontrolleri
-            if self.item_speed <= 0:
-                self.item_speed = 3.0
-            if self.max_items_on_screen < 1:
-                self.max_items_on_screen = 5
+            self.item_speed = max(0.1, self.item_speed)
+            self.max_items_on_screen = max(1, self.max_items_on_screen)
             self.wrong_answer_percentage = max(0, min(100, self.wrong_answer_percentage))
             
             print(f"[LevelManager] Setup Level {level_number}: Speed={self.item_speed}, "
@@ -172,7 +188,7 @@ class LevelManager:
             return True
 
         except Exception as e:
-            print(f"[LevelManager] Error loading level settings: {e}. Using defaults.")
+            print(f"[LevelManager] Error loading level settings: {e}. Using hardcoded defaults.")
             self.item_speed = 3.0
             self.max_items_on_screen = 5
             self.wrong_answer_percentage = 40
@@ -208,90 +224,33 @@ class LevelManager:
         return "BOŞ", "wrong"
     
     def prepare_spawn_events(self, min_items: int = 3, max_items: int = 6) -> None:
-        """Prepare the spawn events for the current level.
-
-        Doc:
-            - Ensures remaining correct items are included.
-            - Adds additional items up to a random count between given bounds.
-            - Spacing between spawns is randomized.
-
-        Args:
-            min_items: Minimum number of items to spawn additionally.
-            max_items: Maximum number of items to spawn additionally.
+        """Gelecek nesne doğumlarını (spawn events) planlar.
+        
+        Batch sürecinde get_new_item() kullanarak wrong_answer_percentage oranına sadık kalır.
         """
-        # debug log kaldırıldı
-        
-        # Always spawn at least the remaining correct items
-        remaining_correct = [
-            item for item in self.correct_items 
-            if item not in self.caught_correct and item not in self.dropped_correct
-        ]
-        
-        # Calculate how many additional items to spawn (if any)
-        additional_items = max(0, random.randint(min_items, max_items) - len(remaining_correct))
-        total_items = len(remaining_correct) + additional_items
-        
-        # debug log kaldırıldı
-        
         self.spawn_events = []
         current_time = pygame.time.get_ticks()
-        # debug log kaldırıldı
         
-        # First, handle items that need to be respawned from level_queue
-        for item_text in self.level_queue[:]:  # Use a copy to safely modify the original
-            delay = random.randint(400, 1200) if self.spawn_events else 0
+        count = random.randint(min_items, max_items)
+        for _ in range(count):
+            # Nesneler arası rastgele gecikme
+            delay = random.randint(600, 1500)
             current_time += delay
             
-            self.spawn_events.append({
-                'time': current_time,
-                'item_text': item_text,
-                'category': self.target_category
-            })
-            # debug log kaldırıldı
-            
-            # Remove from queue after scheduling for respawn
-            self.level_queue.remove(item_text)
-            
-            # Add to dropped_correct if not already there
-            if item_text not in self.dropped_correct:
-                self.dropped_correct.append(item_text)
-        
-        # Then add remaining correct items
-        for item_text in remaining_correct:
-            if item_text in [e['item_text'] for e in self.spawn_events]:
-                continue  # Skip if already in spawn_events from queue
-                
-            delay = random.randint(400, 1200) if self.spawn_events else 0
-            current_time += delay
-            
-            self.spawn_events.append({
-                'time': current_time,
-                'item_text': item_text,
-                'category': self.target_category
-            })
-            self.dropped_correct.append(item_text)
-            # debug log kaldırıldı
-        
-        # Add additional random items if needed
-        for _ in range(additional_items):
-            delay = random.randint(400, 1200)
-            current_time += delay
-            
+            # get_new_item() hem doğru hem yanlış nesneleri oranına göre döner
             item_text, category = self.get_new_item()
-            
-            # Make sure we don't spawn a correct item as a wrong item
-            while category != self.target_category and item_text in self.correct_items:
-                item_text, category = self.get_new_item()
             
             self.spawn_events.append({
                 'time': current_time,
                 'item_text': item_text,
                 'category': category
             })
-            # debug log kaldırıldı
             
-        # debug log kaldırıldı
-        
+            # Doğru nesne ise takip listesine ekle
+            if category == self.target_category:
+                if item_text not in self.dropped_correct:
+                    self.dropped_correct.append(item_text)
+                    
         self.spawn_index = 0
         self.item_spawned_count = 0
         self.spawn_ready = True

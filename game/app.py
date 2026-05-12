@@ -344,16 +344,14 @@ class Game:
             except Exception:
                 pass
 
-    def _draw_wrapped_topleft(self, surface, text: str, font_size: int, x: int, y: int, color, wrap_width: int | None = None):
-        """Sol-Ã¼st (tkinter NW) anchora gÃ¶re Ã§ok satÄ±rlÄ± metin Ã§izer.
+    def _draw_wrapped_topleft(self, surface, text: str, font_size: int, x: int, y: int, color, wrap_width: int | None = None, font_name: str | None = None):
+        """Sol-üst (tkinter NW) anchora göre çok satırlı metin çizer.
 
-        - '\n' satÄ±r sonlarÄ±nÄ± korur.
-        - wrap_width verilirse kelime bazlÄ± sarma uygular.
+        - '\n' satır sonlarını korur.
+        - wrap_width verilirse kelime bazlı sarma uygular.
         """
-        try:
-            font = pygame.font.SysFont(['Verdana', 'Arial', 'sans-serif'], max(12, int(font_size)))
-        except:
-            font = pygame.font.Font(None, max(12, int(font_size)))
+        from .core.utils import load_font
+        font = load_font(font_name, max(12, int(font_size)))
             
         lines: list[str] = []
         raw_lines = str(text or "").split("\n")
@@ -1170,9 +1168,11 @@ class Game:
                     except Exception:
                         color = WHITE
                     x = int(w.get('x', 0)); y = int(w.get('y', 0))
-                    fsz = int(((w.get('font') or {}).get('size')) or 22)
+                    f_cfg = w.get('font') or {}
+                    fsz = int(f_cfg.get('size') or 22)
+                    fname = f_cfg.get('name') or f_cfg.get('family') or 'Arial'
                     wrap_w = max(50, SCREEN_WIDTH - x - 40)
-                    self._draw_wrapped_topleft(self.screen, txt, int(fsz*1.2), x, y, color, wrap_w)
+                    self._draw_wrapped_topleft(self.screen, txt, int(fsz*1.2), x, y, color, wrap_w, fname)
                 elif wtype in ('sprite', 'image'):
                     x = int(w.get('x', 0)); y = int(w.get('y', 0))
                     spr = w.get('sprite') or {}
@@ -1290,19 +1290,20 @@ class Game:
                         txt_color = WHITE
                     base_size = int((txt_cfg.get('font') or {}).get('size') or txt_cfg.get('size') or 30)
                     txt_size = int(base_size * 2.0)
-                    deferred_texts.append((txt, txt_size, txt_color, rect.centerx, rect.centery))
+                    fname = (txt_cfg.get('font') or {}).get('name') or 'Arial'
+                    deferred_texts.append((txt, txt_size, txt_color, rect.centerx, rect.centery, fname))
             except Exception:
                 continue
 
         if deferred_texts:
             from .core.utils import draw_text as _draw_text
-            for txt, txt_size, txt_color, cx, cy in deferred_texts:
+            for txt, txt_size, txt_color, cx, cy, fname in deferred_texts:
                 try:
                     for dx, dy in ((1,1), (-1,1), (1,-1), (-1,-1)):
-                        _draw_text(self.screen, txt, txt_size, cx+dx, cy+dy, (0,0,0))
+                        _draw_text(self.screen, txt, txt_size, cx+dx, cy+dy, (0,0,0), font_name=fname)
                 except Exception:
                     pass
-                _draw_text(self.screen, txt, txt_size, cx, cy, txt_color)
+                _draw_text(self.screen, txt, txt_size, cx, cy, txt_color, font_name=fname)
 
     def update(self):
         """Oyun durumunu gÃ¼nceller; oynanÄ±ÅŸ harici durumlarda erken dÃ¶ner."""
@@ -1352,7 +1353,9 @@ class Game:
         # HazÄ±r event yoksa Ã¼ret
         if self.level_manager.spawn_index >= len(self.level_manager.spawn_events) and not self.level_manager.is_level_complete():
             # min/max adetleri makul tut; LevelManager iÃ§eriden kalan doÄŸru Ã¶ÄŸeleri ekler
-            self.level_manager.prepare_spawn_events(min_items=2, max_items=5)
+            # Seviye tasarımındaki max nesne sayısına göre dinamik batch boyutu
+            mx = int(getattr(self.level_manager, 'max_items_on_screen', 5))
+            self.level_manager.prepare_spawn_events(min_items=mx, max_items=mx + 2)
 
         # Ekranda Ã§ok fazla nesne varsa bekle
         try:
@@ -1431,7 +1434,6 @@ class Game:
                             played = self.effect_manager.trigger_sprite_sheet(
                                 self.effect_sheet_correct_path,
                                 cx, cy,
-                                cols=self.effect_sheet_correct_cols, rows=self.effect_sheet_correct_rows,
                                 scale=self.effect_sheet_correct_scale,
                                 fps=self.effect_sheet_fps,
                                 follow_rect=self.game_state.player.rect,
@@ -1453,6 +1455,9 @@ class Game:
             else:
                 if self.game_state.lose_life(reason="caught_wrong_item"):
                     return 'game_over'
+                
+                # Sepeti sars (Yeni Geribildirim)
+                self.effect_manager.trigger_basket_shake(self.game_state.player)
                 
                 # 1. Frame Sequence Effect (Yeni Sistem)
                 played = False

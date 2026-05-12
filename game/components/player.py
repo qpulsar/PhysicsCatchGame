@@ -20,9 +20,31 @@ class Player(pygame.sprite.Sprite):
         # Position at the bottom center of the screen
         self.rect.midbottom = (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 10)
         self.speed = PLAYER_SPEED
+        
+        # Shake effect state
+        self.shake_intensity = 0
+        self.shake_duration = 0
+        self.shake_offset = (0, 0)
+
+    def apply_shake(self, intensity: int = 5, duration: int = 10):
+        """Sarsıntı efektini başlatır."""
+        self.shake_intensity = intensity
+        self.shake_duration = duration
 
     def update(self):
-        """Update the player's position based on keyboard or Arduino input."""
+        """Update the player's position and handle shake effect."""
+        # Handle shake
+        if self.shake_duration > 0:
+            import random
+            self.shake_offset = (
+                random.randint(-self.shake_intensity, self.shake_intensity),
+                random.randint(-self.shake_intensity, self.shake_intensity)
+            )
+            self.shake_duration -= 1
+            if self.shake_duration <= 0:
+                self.shake_offset = (0, 0)
+        else:
+            self.shake_offset = (0, 0)
         # Keyboard control (if Arduino is not connected)
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT]:
@@ -44,7 +66,13 @@ class Player(pygame.sprite.Sprite):
         try:
             line = ser.readline().decode('utf-8').strip()
             if line:
-                # Map the 0-1023 value from Arduino to the screen width
+                if self.game_state.lose_life(reason="caught_wrong_item"):
+                    return 'game_over'
+                
+                # Sepeti sars
+                self.effect_manager.trigger_basket_shake(self.game_state.player)
+                
+                # 1. Frame Sequence Effect (Yeni Sistem)
                 pot_value = int(line)
                 self.rect.x = int((pot_value / 1023) * (SCREEN_WIDTH - self.rect.width))
         except (UnicodeDecodeError, ValueError):
