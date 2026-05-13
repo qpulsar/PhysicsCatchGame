@@ -16,22 +16,22 @@
     {
       "name": "opening",
       "type": "opening",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Klasik Yakalama\", \"x\": 400, \"y\": 150, \"color\": \"#FFFFFF\", \"size\": 60, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"OYUNA BA\\u015eLA\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"color\": \"#4CAF50\", \"font\": \"Arial\", \"font_size\": 28, \"border_radius\": 15}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Klasik Yakalama\", \"x\": 400, \"y\": 150, \"color\": \"#FFFFFF\", \"font\": {\"name\": \"Arial\", \"size\": 60}, \"shadow\": true}, {\"type\": \"button\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"bg_color\": \"#4CAF50\", \"text_overlay\": {\"text\": \"OYUNA BA\\u015eLA\", \"font\": {\"name\": \"Arial\", \"size\": 28}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "victory",
       "type": "victory",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"TEBR\\u0130KLER!\", \"x\": 400, \"y\": 120, \"color\": \"#4CAF50\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Skor: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 260, \"color\": \"#FFD700\", \"size\": 36, \"font\": \"Arial\"}, {\"type\": \"label\", \"text\": \"Yakalanan: {caught} / {total}\", \"x\": 400, \"y\": 320, \"color\": \"#E0E0E0\", \"size\": 28, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"SONRAK\\u0130 SEV\\u0130YE\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"color\": \"#FF9800\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 15}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"TEBR\\u0130KLER!\", \"x\": 400, \"y\": 120, \"color\": \"#4CAF50\", \"font\": {\"name\": \"Arial\", \"size\": 64}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Skor: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 260, \"color\": \"#FFD700\", \"font\": {\"name\": \"Arial\", \"size\": 36}}, {\"type\": \"label\", \"text\": \"Yakalanan: {caught} / {total}\", \"x\": 400, \"y\": 320, \"color\": \"#E0E0E0\", \"font\": {\"name\": \"Arial\", \"size\": 28}}, {\"type\": \"button\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"bg_color\": \"#FF9800\", \"text_overlay\": {\"text\": \"SONRAK\\u0130 SEV\\u0130YE\", \"font\": {\"name\": \"Arial\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "defeat",
       "type": "defeat",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"OYUN B\\u0130TT\\u0130\", \"x\": 400, \"y\": 150, \"color\": \"#FF5252\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Toplam Skor: {score}\", \"x\": 400, \"y\": 290, \"color\": \"#FFD700\", \"size\": 36, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"ANA MEN\\u00dc\", \"x\": 400, \"y\": 420, \"action\": \"back_to_menu\", \"color\": \"#607D8B\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 10}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"OYUN B\\u0130TT\\u0130\", \"x\": 400, \"y\": 150, \"color\": \"#FF5252\", \"font\": {\"name\": \"Arial\", \"size\": 64}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Toplam Skor: {score}\", \"x\": 400, \"y\": 290, \"color\": \"#FFD700\", \"font\": {\"name\": \"Arial\", \"size\": 36}}, {\"type\": \"button\", \"x\": 400, \"y\": 420, \"action\": \"back_to_menu\", \"bg_color\": \"#607D8B\", \"text_overlay\": {\"text\": \"ANA MEN\\u00dc\", \"font\": {\"name\": \"Arial\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_1_info",
       "type": "info",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"1. SEV\\u0130YE\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Ormanda Y\\u00fcr\\u00fcy\\u00fc\\u015f\", \"x\": 400, \"y\": 200, \"color\": \"#FFD700\", \"size\": 32, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#2196F3\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 12}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"1. SEV\\u0130YE\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"font\": {\"name\": \"Arial\", \"size\": 48}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Ormanda Y\\u00fcr\\u00fcy\\u00fc\\u015f\", \"x\": 400, \"y\": 200, \"color\": \"#FFD700\", \"font\": {\"name\": \"Arial\", \"size\": 32}}, {\"type\": \"button\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"bg_color\": \"#2196F3\", \"text_overlay\": {\"text\": \"BA\\u015eLA\", \"font\": {\"name\": \"Arial\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_1",
@@ -41,7 +41,7 @@
     {
       "name": "level_2_info",
       "type": "info",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"2. SEV\\u0130YE\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Daha H\\u0131zl\\u0131 Kararlar\", \"x\": 400, \"y\": 200, \"color\": \"#FFD700\", \"size\": 32, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#2196F3\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 12}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"2. SEV\\u0130YE\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"font\": {\"name\": \"Arial\", \"size\": 48}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Daha H\\u0131zl\\u0131 Kararlar\", \"x\": 400, \"y\": 200, \"color\": \"#FFD700\", \"font\": {\"name\": \"Arial\", \"size\": 32}}, {\"type\": \"button\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"bg_color\": \"#2196F3\", \"text_overlay\": {\"text\": \"BA\\u015eLA\", \"font\": {\"name\": \"Arial\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_2",

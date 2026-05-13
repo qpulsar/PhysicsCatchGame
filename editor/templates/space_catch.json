@@ -16,22 +16,22 @@
     {
       "name": "opening",
       "type": "opening",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"UZAY G\\u00d6REV\\u0130\", \"x\": 400, \"y\": 140, \"color\": \"#00FFFF\", \"size\": 64, \"font\": \"Orbitron\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"F\\u0130LOYA KATIL\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"color\": \"#9C27B0\", \"font\": \"Orbitron\", \"font_size\": 26, \"border_radius\": 20}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"UZAY G\\u00d6REV\\u0130\", \"x\": 400, \"y\": 140, \"color\": \"#00FFFF\", \"font\": {\"name\": \"Orbitron\", \"size\": 64}, \"shadow\": true}, {\"type\": \"button\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"bg_color\": \"#9C27B0\", \"text_overlay\": {\"text\": \"F\\u0130LOYA KATIL\", \"font\": {\"name\": \"Orbitron\", \"size\": 26}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "victory",
       "type": "victory",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"G\\u00d6REV BA\\u015eARILI\", \"x\": 400, \"y\": 120, \"color\": \"#00FF00\", \"size\": 56, \"font\": \"Orbitron\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Skor: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 270, \"color\": \"#00FFFF\", \"size\": 34, \"font\": \"Orbitron\"}, {\"type\": \"label\", \"text\": \"Toplanan: {caught} / {total}\", \"x\": 400, \"y\": 330, \"color\": \"#FF00FF\", \"size\": 26, \"font\": \"Orbitron\"}, {\"type\": \"button\", \"text\": \"\\u0130LER\\u0130\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"color\": \"#673AB7\", \"font\": \"Orbitron\", \"font_size\": 24, \"border_radius\": 15}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"G\\u00d6REV BA\\u015eARILI\", \"x\": 400, \"y\": 120, \"color\": \"#00FF00\", \"font\": {\"name\": \"Orbitron\", \"size\": 56}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Skor: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 270, \"color\": \"#00FFFF\", \"font\": {\"name\": \"Orbitron\", \"size\": 34}}, {\"type\": \"label\", \"text\": \"Toplanan: {caught} / {total}\", \"x\": 400, \"y\": 330, \"color\": \"#FF00FF\", \"font\": {\"name\": \"Orbitron\", \"size\": 26}}, {\"type\": \"button\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"bg_color\": \"#673AB7\", \"text_overlay\": {\"text\": \"\\u0130LER\\u0130\", \"font\": {\"name\": \"Orbitron\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "defeat",
       "type": "defeat",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"S\\u0130STEM \\u00c7\\u00d6KT\\u00dc\", \"x\": 400, \"y\": 150, \"color\": \"#FF0000\", \"size\": 64, \"font\": \"Orbitron\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Son Skor: {score}\", \"x\": 400, \"y\": 300, \"color\": \"#00FFFF\", \"size\": 36, \"font\": \"Orbitron\"}, {\"type\": \"button\", \"text\": \"\\u00dcSSE D\\u00d6N\", \"x\": 400, \"y\": 430, \"action\": \"back_to_menu\", \"color\": \"#333333\", \"font\": \"Orbitron\", \"font_size\": 24, \"border_radius\": 10}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"S\\u0130STEM \\u00c7\\u00d6KT\\u00dc\", \"x\": 400, \"y\": 150, \"color\": \"#FF0000\", \"font\": {\"name\": \"Orbitron\", \"size\": 64}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Son Skor: {score}\", \"x\": 400, \"y\": 300, \"color\": \"#00FFFF\", \"font\": {\"name\": \"Orbitron\", \"size\": 36}}, {\"type\": \"button\", \"x\": 400, \"y\": 430, \"action\": \"back_to_menu\", \"bg_color\": \"#333333\", \"text_overlay\": {\"text\": \"\\u00dcSSE D\\u00d6N\", \"font\": {\"name\": \"Orbitron\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_1_info",
       "type": "info",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SEKT\\u00d6R ALPHA\", \"x\": 400, \"y\": 120, \"color\": \"#00FFFF\", \"size\": 48, \"font\": \"Orbitron\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"S\\u0130STEMLER\\u0130 A\\u00c7\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#2196F3\", \"font\": \"Orbitron\", \"font_size\": 24, \"border_radius\": 15}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SEKT\\u00d6R ALPHA\", \"x\": 400, \"y\": 120, \"color\": \"#00FFFF\", \"font\": {\"name\": \"Orbitron\", \"size\": 48}, \"shadow\": true}, {\"type\": \"button\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"bg_color\": \"#2196F3\", \"text_overlay\": {\"text\": \"S\\u0130STEMLER\\u0130 A\\u00c7\", \"font\": {\"name\": \"Orbitron\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_1",
@@ -41,7 +41,7 @@
     {
       "name": "level_2_info",
       "type": "info",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SEKT\\u00d6R BETA\", \"x\": 400, \"y\": 120, \"color\": \"#00FFFF\", \"size\": 48, \"font\": \"Orbitron\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"G\\u00dcC\\u00dc ARTIR\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#2196F3\", \"font\": \"Orbitron\", \"font_size\": 24, \"border_radius\": 15}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/space_nebula.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SEKT\\u00d6R BETA\", \"x\": 400, \"y\": 120, \"color\": \"#00FFFF\", \"font\": {\"name\": \"Orbitron\", \"size\": 48}, \"shadow\": true}, {\"type\": \"button\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"bg_color\": \"#2196F3\", \"text_overlay\": {\"text\": \"G\\u00dcC\\u00dc ARTIR\", \"font\": {\"name\": \"Orbitron\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_2",

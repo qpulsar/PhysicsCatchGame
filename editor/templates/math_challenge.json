@@ -16,22 +16,22 @@
     {
       "name": "opening",
       "type": "opening",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Matematik Yar\\u0131\\u015f\\u0131\", \"x\": 400, \"y\": 140, \"color\": \"#FFFFFF\", \"size\": 60, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"TESTE BA\\u015eLA\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"color\": \"#009688\", \"font\": \"Righteous\", \"font_size\": 26, \"border_radius\": 12}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Matematik Yar\\u0131\\u015f\\u0131\", \"x\": 400, \"y\": 140, \"color\": \"#FFFFFF\", \"font\": {\"name\": \"Righteous\", \"size\": 60}, \"shadow\": true}, {\"type\": \"button\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"bg_color\": \"#009688\", \"text_overlay\": {\"text\": \"TESTE BA\\u015eLA\", \"font\": {\"name\": \"Righteous\", \"size\": 26}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "victory",
       "type": "victory",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"A+\", \"x\": 400, \"y\": 110, \"color\": \"#4CAF50\", \"size\": 80, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Puan: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 260, \"color\": \"#FFEB3B\", \"size\": 32, \"font\": \"Righteous\"}, {\"type\": \"label\", \"text\": \"Do\\u011frular: {caught} / {total}\", \"x\": 400, \"y\": 320, \"color\": \"#4DD0E1\", \"size\": 26, \"font\": \"Righteous\"}, {\"type\": \"button\", \"text\": \"SIRADAK\\u0130 SORU\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"color\": \"#00BCD4\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 12}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"A+\", \"x\": 400, \"y\": 110, \"color\": \"#4CAF50\", \"font\": {\"name\": \"Righteous\", \"size\": 80}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Puan: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 260, \"color\": \"#FFEB3B\", \"font\": {\"name\": \"Righteous\", \"size\": 32}}, {\"type\": \"label\", \"text\": \"Do\\u011frular: {caught} / {total}\", \"x\": 400, \"y\": 320, \"color\": \"#4DD0E1\", \"font\": {\"name\": \"Righteous\", \"size\": 26}}, {\"type\": \"button\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"bg_color\": \"#00BCD4\", \"text_overlay\": {\"text\": \"SIRADAK\\u0130 SORU\", \"font\": {\"name\": \"Righteous\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "defeat",
       "type": "defeat",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SINIFTA KALDIN\", \"x\": 400, \"y\": 150, \"color\": \"#F44336\", \"size\": 60, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Toplam Puan: {score}\", \"x\": 400, \"y\": 300, \"color\": \"#FFC107\", \"size\": 36, \"font\": \"Righteous\"}, {\"type\": \"button\", \"text\": \"TEKRAR \\u00c7ALI\\u015e\", \"x\": 400, \"y\": 430, \"action\": \"back_to_menu\", \"color\": \"#795548\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 10}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SINIFTA KALDIN\", \"x\": 400, \"y\": 150, \"color\": \"#F44336\", \"font\": {\"name\": \"Righteous\", \"size\": 60}, \"shadow\": true}, {\"type\": \"label\", \"text\": \"Toplam Puan: {score}\", \"x\": 400, \"y\": 300, \"color\": \"#FFC107\", \"font\": {\"name\": \"Righteous\", \"size\": 36}}, {\"type\": \"button\", \"x\": 400, \"y\": 430, \"action\": \"back_to_menu\", \"bg_color\": \"#795548\", \"text_overlay\": {\"text\": \"TEKRAR \\u00c7ALI\\u015e\", \"font\": {\"name\": \"Righteous\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_1_info",
       "type": "info",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"DERS 1\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#FF5722\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 12}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"DERS 1\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"font\": {\"name\": \"Righteous\", \"size\": 48}, \"shadow\": true}, {\"type\": \"button\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"bg_color\": \"#FF5722\", \"text_overlay\": {\"text\": \"BA\\u015eLA\", \"font\": {\"name\": \"Righteous\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_1",
@@ -41,7 +41,7 @@
     {
       "name": "level_2_info",
       "type": "info",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"DERS 2\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#FF5722\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 12}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"DERS 2\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"font\": {\"name\": \"Righteous\", \"size\": 48}, \"shadow\": true}, {\"type\": \"button\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"bg_color\": \"#FF5722\", \"text_overlay\": {\"text\": \"BA\\u015eLA\", \"font\": {\"name\": \"Righteous\", \"size\": 24}, \"color\": \"#FFFFFF\"}}]}"
     },
     {
       "name": "level_2",
