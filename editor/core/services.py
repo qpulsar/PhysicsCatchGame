@@ -20,6 +20,7 @@ from .models import (
 from ..database.database import DatabaseManager
 import json
 from pathlib import Path
+from ..utils import get_project_root
 
 
 class GameService:
@@ -653,7 +654,7 @@ class SpriteService:
         p = image_path.replace('\\', '/').strip()
         # If absolute and under project root, make relative
         try:
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+            project_root = get_project_root()
             if os.path.isabs(p):
                 # normalize for os
                 pr = project_root
@@ -670,7 +671,7 @@ class TemplateService:
     """Service for managing game templates."""
 
     def __init__(self):
-        self.templates_dir = Path(__file__).parent.parent / "templates"
+        self.templates_dir = Path(get_project_root()) / "editor" / "templates"
         self.templates_dir.mkdir(parents=True, exist_ok=True)
 
     def list_templates(self) -> List[Dict[str, str]]:

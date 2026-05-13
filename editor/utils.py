@@ -80,15 +80,48 @@ def get_path_separator() -> str:
 
 
 def normalize_path(path: str) -> str:
-    """Yolu işletim sistemine göre normalize eder.
-    
-    Args:
-        path: Normalize edilecek yol
-    
-    Returns:
-        Normalize edilmiş yol
-    """
+    """Yolu işletim sistemine göre normalize eder."""
     if is_windows():
         return path.replace('/', '\\')
     else:
         return path.replace('\\', '/')
+
+def get_project_root() -> str:
+    """Proje kök dizinini döndürür.
+    
+    Bundled (.exe) modunda .exe'nin yanındaki dizini,
+    Geliştirme modunda ise editor/ klasörünün üstündeki dizini döndürür.
+    """
+    import os
+    if getattr(sys, 'frozen', False):
+        # Bundled executable
+        return os.path.dirname(sys.executable)
+    else:
+        # Dev mode (editor/utils.py is in editor/)
+        # We need to go up one level to get to the project root
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+
+def pil_to_tkphoto(pil_image):
+    """PIL Image nesnesini tkinter PhotoImage'e dönüştürür.
+    
+    PIL.ImageTk.PhotoImage yerine bu fonksiyonu kullanın.
+    ImageTk, dahili olarak _imagingtk C modülüne bağımlıdır ve
+    PyInstaller ile paketlenmesinde sorun yaşanmaktadır.
+    Bu fonksiyon base64 kodlama ile bu bağımlılığı ortadan kaldırır.
+    
+    Args:
+        pil_image: PIL.Image nesnesi
+        
+    Returns:
+        tkinter.PhotoImage nesnesi
+    """
+    import io
+    import base64
+    import tkinter as tk
+    
+    buffer = io.BytesIO()
+    pil_image.save(buffer, format='PNG')
+    buffer.seek(0)
+    photo_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    return tk.PhotoImage(data=photo_data)

@@ -1,3 +1,5 @@
 /.windsurf/
 /.venv/
 /.idea/
+*/__pycache__
+*.pyc

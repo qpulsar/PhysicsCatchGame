@@ -75,9 +75,10 @@ class Game:
             self.selected_game = next((g for g in self.games if getattr(g, 'id', None) == force_game_id), None)
             # Per-game background
             try:
-                settings = self.db.get_game_settings(force_game_id)
-                bg_path = settings.get('start_background_path')
-                if bg_path and os.path.exists(bg_path):
+                settings_map = self.db.get_game_settings(force_game_id)
+                bg_path_rel = settings_map.get('start_background_path')
+                bg_path = self._abs_project_path(bg_path_rel) if bg_path_rel else None
+                if bg_path:
                     self.per_game_bg_surface = pygame.image.load(bg_path).convert()
             except Exception:
                 self.per_game_bg_surface = None
@@ -232,10 +233,28 @@ class Game:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.current_state == 'game_selection' and self.editor_button_rect and self.editor_button_rect.collidepoint(event.pos):
                     try:
-                        subprocess.Popen([sys.executable, "editor/editor.py"])
+                        # PyInstaller bundle'da sys.executable programın kendisidir.
+                        # Geliştirme ortamında ise python main.py şeklinde çalıştırılmalıdır.
+                        is_frozen = getattr(sys, 'frozen', False)
+                        
+                        if is_frozen:
+                            # Bundle modunda .exe dosyasını çalıştır
+                            cmd = [sys.executable, "--editor"]
+                        else:
+                            # Geliştirme modunda python main.py --editor çalıştır
+                            # sys.argv[0] genellikle main.py'dir
+                            main_script = os.path.abspath(sys.argv[0])
+                            cmd = [sys.executable, main_script, "--editor"]
+                        
+                        print(f"Editör başlatılıyor: {' '.join(cmd)}")
+                        subprocess.Popen(cmd)
+                        
+                        # Editör açıldığında oyun kapansın
                         return False
                     except Exception as e:
-                        print(f"EditÃ¶r baÅŸlatÄ±lamadÄ±: {e}")
+                        print(f"Editör başlatılamadı: {e}")
+                        import traceback
+                        traceback.print_exc()
                 else:
                     self.handle_mouse_click(event.pos)
 
@@ -482,10 +501,11 @@ class Game:
         self.level_bg_surface = None
         try:
             settings_map = self.db.get_game_settings(game_id)
-            lvl_key = f"level_{level_num}_background_path"
-            lvl_key = f"level_{self.level_manager.level}_background_path"
-            bg_path = settings_map.get(lvl_key)
-            if bg_path and os.path.exists(bg_path):
+            lvl_num = self.level_manager.level
+            lvl_key = f"level_{lvl_num}_background_path"
+            bg_path_rel = settings_map.get(lvl_key)
+            bg_path = self._abs_project_path(bg_path_rel) if bg_path_rel else None
+            if bg_path:
                 self.level_bg_surface = pygame.image.load(bg_path).convert()
         except Exception:
             self.level_bg_surface = None
@@ -1349,36 +1369,29 @@ class Game:
                 _draw_text(self.screen, txt, txt_size, cx, cy, txt_color, font_name=fname)
 
     def update(self):
-        """Oyun durumunu gÃ¼nceller; oynanÄ±ÅŸ harici durumlarda erken dÃ¶ner."""
+        """Oyun durumunu günceller; oynanış harici durumlarda erken döner."""
         if self.current_state != 'playing':
             return
             
-        new_state = self.game_state.update(self.level_manager)
-        if new_state:
-            self.current_state = new_state
-            return
-
-        self.handle_item_spawning()
-        
+        # 1. Çarpışmaları kontrol et (seviye bitişini tetikleyebilir)
         collision_state = self.check_collisions()
         if collision_state:
             self.current_state = collision_state
             if collision_state == 'game_over':
-                # Yenilgi ekranı tasarımını yükle
                 self.defeat_data = self.db.get_screen(self.selected_game_id, 'defeat')
             return
-            
-        self.remove_off_screen_items()
-        
-        # Zafer kontrolü (tüm seviyeler bitti mi?)
-        if self.level_manager.is_level_complete():
-            next_level = self.level_manager.level + 1
-            if not self.level_manager.db.get_level_data(self.selected_game_id, next_level):
-                # Başka seviye yoksa zafer ekranına geç
-                self.current_state = 'victory'
+
+        # 2. Oyun durumunu güncelle (seviye geçişini yönetir)
+        new_state = self.game_state.update(self.level_manager)
+        if new_state:
+            self.current_state = new_state
+            if new_state == 'victory':
                 self.victory_data = self.db.get_screen(self.selected_game_id, 'victory')
-            else:
-                self.current_state = 'level_up'
+            return
+
+        # 3. Diğer güncellemeler
+        self.handle_item_spawning()
+        self.remove_off_screen_items()
 
     def draw(self):
         mouse_pos = pygame.mouse.get_pos()

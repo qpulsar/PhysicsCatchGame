@@ -3,6 +3,7 @@ import os
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple, Union
 from pathlib import Path
+import sys
 
 
 class DatabaseManager:
@@ -15,7 +16,12 @@ class DatabaseManager:
             db_path: Path to the SQLite database file. If None, uses default location.
         """
         if db_path is None:
-            base_dir = Path(__file__).parent.parent.parent
+            # Determine base directory (where the .exe or main.py is)
+            if getattr(sys, 'frozen', False):
+                base_dir = Path(sys.executable).parent
+            else:
+                base_dir = Path(__file__).parent.parent.parent
+            
             self.db_path = str(base_dir / 'game_data.db')
         else:
             self.db_path = db_path

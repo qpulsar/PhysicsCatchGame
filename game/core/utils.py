@@ -7,22 +7,25 @@ from settings import ALL_QUANTITIES, LEVEL_TARGETS
 import random
 
 def get_resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        # Dev mode: use project root (two levels up from this file: game/core/utils.py -> game/core -> game -> root)
-        # However, checking the folder structure:
-        # game/core/utils.py
-        # App is at root/main.py
-        # We want base_path to be root.
-        # os.path.dirname(__file__) is .../game/core
-        # .. is .../game
-        # .. is .../ (root)
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    """Get absolute path to resource, priorities external files for modifiability"""
+    # 1. Determine base path (where the .exe or main.py is)
+    if getattr(sys, 'frozen', False):
+        # Running as a bundled executable
+        base_path = os.path.dirname(sys.executable)
+    else:
+        # Running in development mode
+        base_path = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-    return os.path.join(base_path, relative_path)
+    # 2. Check if the file exists externally (next to the .exe)
+    external_path = os.path.join(base_path, relative_path)
+    if os.path.exists(external_path):
+        return external_path
+
+    # 3. Fallback to _MEIPASS (embedded files) if external not found
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+
+    return external_path
 
 
 def load_font(name: str | None, size: int) -> pygame.font.Font:
@@ -38,17 +41,13 @@ def load_font(name: str | None, size: int) -> pygame.font.Font:
             return pygame.font.Font(None, size)
 
     # 2. Özel TTF dosyasını kontrol et (assets/fonts)
-    # Proje kök dizini (game/core/utils.py -> game/core -> game -> root)
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    fonts_dir = os.path.join(project_root, 'assets', 'fonts')
-    
     # Dosya adını temizle ve .ttf ekle (yoksa)
     clean_name = name
     if not clean_name.lower().endswith('.ttf'):
         clean_name += '.ttf'
     
     # Tam yolu oluştur
-    font_path = os.path.join(fonts_dir, clean_name)
+    font_path = get_resource_path(os.path.join('assets', 'fonts', clean_name))
     
     if os.path.isfile(font_path):
         try:

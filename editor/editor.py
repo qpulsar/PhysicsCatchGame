@@ -3,9 +3,7 @@ from tkinter import ttk
 import os
 import sys
 
-# Add the parent directory to the path so we can import from the editor package
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+from editor.utils import get_project_root
 from editor.database.database import DatabaseManager
 from editor.ui.main_window import MainWindow
 
@@ -24,9 +22,12 @@ if __name__ == "__main__":
         if "clam" in style.theme_names():
             style.theme_use("clam")
 
-    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'game_data.db')
+    project_root = get_project_root()
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+        
+    db_path = os.path.join(project_root, 'game_data.db')
     db_manager = DatabaseManager(db_path)
 
-    #    app = LevelEditor(root, DB_PATH=db_path)
     app = MainWindow(root, db_manager)
     root.mainloop()

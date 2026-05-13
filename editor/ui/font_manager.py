@@ -1,7 +1,8 @@
 import os
 import tkinter as tk
 from tkinter import ttk, colorchooser
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageDraw
+from ..utils import pil_to_tkphoto
 import pygame
 
 class FontManagerWindow(tk.Toplevel):
@@ -184,7 +185,7 @@ class FontManagerWindow(tk.Toplevel):
                 if y_offset > ch - 20:
                     break
             
-            photo = ImageTk.PhotoImage(bg_img)
+            photo = pil_to_tkphoto(bg_img)
             self.preview_canvas.delete("all")
             self.preview_canvas.create_image(0, 0, anchor="nw", image=photo)
             self.tk_preview = photo 

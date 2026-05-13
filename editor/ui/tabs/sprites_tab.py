@@ -12,10 +12,11 @@ from typing import Optional, Dict, List
 import json
 import unicodedata
 import numpy as np
-from PIL import Image, ImageTk, ImageDraw, ImageChops, ImageFilter
+from PIL import Image, ImageDraw, ImageChops, ImageFilter
 
 from ...core.models import Sprite, SpriteDefinition, Expression
 from ...core.services import SpriteService, ExpressionService, LevelService, GameService
+from ...utils import get_project_root, pil_to_tkphoto
 
 # A simple pop-up window to draw a rectangle on an image
 class Cropper(tk.Toplevel):
@@ -28,7 +29,7 @@ class Cropper(tk.Toplevel):
         self.result = None
 
         self.image = Image.open(image_path)
-        self.tk_image = ImageTk.PhotoImage(self.image)
+        self.tk_image = pil_to_tkphoto(self.image)
 
         self.canvas = tk.Canvas(self, width=self.image.width, height=self.image.height, cursor="cross")
         self.canvas.create_image(0, 0, anchor="nw", image=self.tk_image)
@@ -221,7 +222,7 @@ class SpritesTab:
 
     def _load_image(self, rel_path: str):
         self.image_canvas.delete("all")
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        project_root = get_project_root()
         abs_path = os.path.join(project_root, rel_path)
         if os.path.exists(abs_path):
             image = Image.open(abs_path)
@@ -246,7 +247,7 @@ class SpritesTab:
         rel = self._index_to_path.get(iid)
         if not rel:
             return
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        project_root = get_project_root()
         abs_path = os.path.join(project_root, rel)
         if not os.path.exists(abs_path):
             messagebox.showwarning("Uyarı", "Dosya bulunamadı.")
@@ -293,7 +294,7 @@ class SpritesTab:
             if not rel:
                 messagebox.showwarning("Uyarı", "Görsel yolu alınamadı.")
                 return
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+            project_root = get_project_root()
             abs_path = os.path.join(project_root, rel)
             if not os.path.isfile(abs_path):
                 messagebox.showwarning("Uyarı", "Dosya bulunamadı.")
@@ -542,7 +543,7 @@ class SpritesTab:
         # Görseli ölçekle ve çiz
         pil = Image.open(abs_image_path).convert('RGBA')
         pil_rz = pil.resize((cw, ch), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(pil_rz)
+        photo = pil_to_tkphoto(pil_rz)
         canvas.create_image(0, 0, anchor='nw', image=photo)
 
         # Referansları sakla
@@ -647,7 +648,7 @@ class SpritesTab:
                 scale = min(tw / max(1, crop.width), th / max(1, crop.height))
                 rz = (max(1, int(crop.width * scale)), max(1, int(crop.height * scale)))
                 prev = crop.resize(rz, Image.LANCZOS)
-                photo = ImageTk.PhotoImage(prev)
+                photo = pil_to_tkphoto(prev)
                 lbl = ttk.Label(wrap, image=photo)
                 lbl.image = photo  # referans
                 lbl.pack()
@@ -751,7 +752,7 @@ class SpritesTab:
 
         Returns relative paths from project root using forward slashes.
         """
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        project_root = get_project_root()
         sprites_root = os.path.join(project_root, "assets", "images", "sprites")
         img_exts = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
 
@@ -799,7 +800,7 @@ class SpritesTab:
         entry = self._get_selected_region_entry()
         if not entry:
             return
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        project_root = get_project_root()
         abs_path = os.path.join(project_root, entry.get("image_path", ""))
         if not os.path.isfile(abs_path):
             return
@@ -844,7 +845,7 @@ class SpritesTab:
             new_w = max(1, int(iw * scale))
             new_h = max(1, int(ih * scale))
             resized = pil_image.resize((new_w, new_h), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(resized)
+            photo = pil_to_tkphoto(resized)
             
             # Ortala
             canvas.create_image(max_w//2, max_h//2, anchor="center", image=photo)
@@ -872,7 +873,7 @@ class SpritesTab:
             grad_img.putpixel((0, y), (r, g, b))
             
         full_bg = grad_img.resize((w, h), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(full_bg)
+        photo = pil_to_tkphoto(full_bg)
         canvas.create_image(0, 0, anchor="nw", image=photo)
         
         # Referansı sakla (GC önlemi)
@@ -915,7 +916,7 @@ class SpritesTab:
         entry = self._get_selected_region_entry()
         if not entry:
             return
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        project_root = get_project_root()
         abs_path = os.path.join(project_root, entry.get("image_path",""))
         if not os.path.isfile(abs_path):
             messagebox.showwarning("Uyarı", "Görsel bulunamadı.")
@@ -939,7 +940,7 @@ class SpritesTab:
         except Exception as e:
             messagebox.showerror("Debug", f"DB okunamadı: {e}")
             return
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        project_root = get_project_root()
         total = len(rows)
         exists_cnt = 0
         missing = []
@@ -987,7 +988,7 @@ class SpritesTab:
 
     # ----- Legacy metadata migration (one-time) -----
     def _metadata_path(self) -> str:
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        project_root = get_project_root()
         return os.path.join(project_root, "assets", "metadata.json")
 
     def _read_metadata_sprite_regions(self) -> List[Dict]:

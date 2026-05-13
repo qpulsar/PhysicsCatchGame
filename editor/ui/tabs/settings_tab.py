@@ -7,7 +7,7 @@ import unicodedata
 from typing import Dict, Any, Optional, Callable
 
 from ...core.services import GameService
-from ...utils import format_filetypes_for_dialog
+from ...utils import format_filetypes_for_dialog, get_project_root
 
 
 class SettingsTab:
@@ -224,7 +224,7 @@ class SettingsTab:
                         if not src_thumb.lower().endswith(valid_extensions):
                             messagebox.showwarning("Uyarı", "Geçersiz dosya formatı. Sadece PNG, JPG, JPEG, BMP veya GIF dosyaları desteklenir.")
                         else:
-                            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+                            project_root = get_project_root()
                             dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'thumbnails')
                             
                             # Hedef dizini oluştur
@@ -263,7 +263,7 @@ class SettingsTab:
                         if not src_music.lower().endswith(valid_extensions):
                             messagebox.showwarning("Uyarı", "Geçersiz dosya formatı. Sadece MP3, WAV veya OGG dosyaları desteklenir.")
                         else:
-                            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+                            project_root = get_project_root()
                             dst_dir = os.path.join(project_root, 'assets', 'games', str(game_id), 'audio')
                             
                             # Hedef dizini oluştur

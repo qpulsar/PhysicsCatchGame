@@ -3,11 +3,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import os
 import threading
-from PIL import Image, ImageTk
+from PIL import Image
 import sys
 
+from .screens_tab import ScreensTab # Dummy import for order if needed, but we need get_project_root
+from ...utils import get_project_root, pil_to_tkphoto
+
 # Proje kökünü yola ekle (arduino.py için)
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+project_root = get_project_root()
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -166,7 +169,7 @@ class ArduinoTab:
                 img = Image.open(img_path)
                 # Resize if too big
                 img.thumbnail((380, 280))
-                self.schematic_photo = ImageTk.PhotoImage(img)
+                self.schematic_photo = pil_to_tkphoto(img)
                 self.schematic_canvas.create_image(190, 140, image=self.schematic_photo)
                 
                 # Draw labels

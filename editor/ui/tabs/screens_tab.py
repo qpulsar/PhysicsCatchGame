@@ -15,9 +15,10 @@ from tkinter import ttk, messagebox
 from typing import Optional, List, Dict, Any
 import os
 import json
-from PIL import Image, ImageTk
+from PIL import Image
 
 from ..screen_designer import ScreenDesignerWindow
+from ...utils import get_project_root, pil_to_tkphoto
 
 
 class ScreensTab:
@@ -46,8 +47,8 @@ class ScreensTab:
         self.effect_service = effect_service
         
         # Project root for assets
-        self._project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
-        self._photo_refs: List[ImageTk.PhotoImage] = []
+        self._project_root = get_project_root()
+        self._photo_refs: List[tk.PhotoImage] = []
 
         self.frame = ttk.Frame(parent, padding=10)
         self.frame.columnconfigure(0, weight=1)
@@ -99,7 +100,19 @@ class ScreensTab:
     # Public API
     def refresh(self) -> None:
         """Ekran listelerini yeniler (küçük bir gecikmeyle dosya sistemine zaman tanır)."""
-        self.frame.after(300, self._actual_refresh)
+        try:
+            if self.frame.winfo_exists():
+                self.frame.after(300, self._safe_actual_refresh)
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _safe_actual_refresh(self) -> None:
+        """Hatalara karşı korumalı yenileme çağrısı."""
+        try:
+            if self.frame.winfo_exists():
+                self._actual_refresh()
+        except (tk.TclError, AttributeError):
+            pass
 
     def _actual_refresh(self) -> None:
         """Asıl yenileme mantığı."""
@@ -160,14 +173,14 @@ class ScreensTab:
                     canvas_img = Image.new('RGB', thumb_size, (40, 44, 52))
                     offset = ((thumb_size[0] - img.size[0]) // 2, (thumb_size[1] - img.size[1]) // 2)
                     canvas_img.paste(img, offset)
-                    photo = ImageTk.PhotoImage(canvas_img)
+                    photo = pil_to_tkphoto(canvas_img)
                 except: pass
 
             if not photo:
                 # 3. Hiç görsel yoksa standart placeholder oluştur
                 placeholder = Image.new('RGB', thumb_size, (60, 63, 65))
                 # Ortaya bir ikon veya metin ekleyebiliriz (opsiyonel)
-                photo = ImageTk.PhotoImage(placeholder)
+                photo = pil_to_tkphoto(placeholder)
                 thumb_lbl.configure(text="Tasarım Yok", compound="center", foreground="#888888")
             
             if photo:
@@ -212,7 +225,7 @@ class ScreensTab:
                 canvas_img = Image.new('RGB', thumb_size, (40, 44, 52))
                 offset = ((thumb_size[0] - img.size[0]) // 2, (thumb_size[1] - img.size[1]) // 2)
                 canvas_img.paste(img, offset)
-                photo = ImageTk.PhotoImage(canvas_img)
+                photo = pil_to_tkphoto(canvas_img)
                 self._photo_refs.append(photo)
             except: pass
             

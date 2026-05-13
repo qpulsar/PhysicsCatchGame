@@ -159,8 +159,8 @@ class GameState:
             if level_manager.setup_level(next_level, getattr(level_manager, 'game_id', None)):
                  return 'level_up'
             else:
-                 self.game_over = True
-                 return 'game_over'
+                 # No more levels means victory!
+                 return 'victory'
                 
         # Update effects
         self.cleanup_effects()

@@ -16,7 +16,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import List, Optional, Tuple
 
-from PIL import Image, ImageTk
+from PIL import Image
+from ..utils import get_project_root, pil_to_tkphoto
 
 
 class EffectsManagerWindow(tk.Toplevel):
@@ -42,14 +43,14 @@ class EffectsManagerWindow(tk.Toplevel):
         self.transient(parent)
 
         # Proje kökü (assets için)
-        self._project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+        self._project_root = get_project_root()
         self._assets_root = os.path.join(self._project_root, "assets")
 
         # Durum
         self.frames: List[dict] = []
         self._current_image_path: Optional[str] = None
         self._pil_image: Optional[Image.Image] = None
-        self._tk_image: Optional[ImageTk.PhotoImage] = None
+        self._tk_image: Optional[tk.PhotoImage] = None
         self._scale: float = 1.0
         self._sel_start: Optional[Tuple[int, int]] = None
         self._sel_rect_id: Optional[int] = None
@@ -63,7 +64,7 @@ class EffectsManagerWindow(tk.Toplevel):
         self._hover_line: Optional[Tuple[str, int]] = None
         
         # Animation Preview state
-        self._preview_refs: List[ImageTk.PhotoImage] = []
+        self._preview_refs: List[tk.PhotoImage] = []
         self._preview_job: Optional[str] = None
         self._preview_loop_idx = 0
 
@@ -343,7 +344,7 @@ class EffectsManagerWindow(tk.Toplevel):
             self._scale = 1.0
         rw, rh = int(iw * self._scale), int(ih * self._scale)
         rz = self._pil_image.resize((rw, rh), Image.LANCZOS)
-        self._tk_image = ImageTk.PhotoImage(rz)
+        self._tk_image = pil_to_tkphoto(rz)
         
         self.canvas.delete("all")
         self._draw_gradient_background(self.canvas, rw, rh)
@@ -554,7 +555,7 @@ class EffectsManagerWindow(tk.Toplevel):
             
             rw, rh = int(iw * scale), int(ih * scale)
             rz = crop.resize((rw, rh), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(rz)
+            photo = pil_to_tkphoto(rz)
             
             self.preview_canvas.delete("pv")
             self._draw_gradient_background(self.preview_canvas, pw, ph)
@@ -593,7 +594,7 @@ class EffectsManagerWindow(tk.Toplevel):
                 if scale > 2.0: scale = 2.0
                 rw, rh = int(iw * scale), int(ih * scale)
                 rz = crop.resize((rw, rh), Image.LANCZOS)
-                self._preview_refs.append(ImageTk.PhotoImage(rz))
+                self._preview_refs.append(pil_to_tkphoto(rz))
             except Exception:
                 continue
 
@@ -641,7 +642,7 @@ class EffectsManagerWindow(tk.Toplevel):
                 b = int(top_color[2] + (bottom_color[2] - top_color[2]) * (y / h))
                 grad_img.putpixel((0, y), (r, g, b))
             full_bg = grad_img.resize((w, h), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(full_bg)
+            photo = pil_to_tkphoto(full_bg)
             canvas.create_image(0, 0, anchor="nw", image=photo, tags=("bg_grad",))
             # Tag'i en alta it
             canvas.tag_lower("bg_grad")

@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 from settings import *
 from ..screens.game_screens import Database  # reuse simple runtime DB helper
+from ..core.utils import get_resource_path
 
 # This is a simplified version of the DatabaseManager from the editor
 # to avoid complex dependencies.
@@ -99,7 +100,8 @@ class LevelManager:
             - Item speed and other parameters may be overridden by game settings
               when `setup_level()` is called.
         """
-        self.db = LevelDatabase()
+        # Seviye veri tabanını bundle-safe yolla başlat
+        self.db = LevelDatabase(get_resource_path('game_data.db'))
         self.level: int = 1
         self.game_id: Optional[int] = None
         self.target_category: Optional[str] = None # Will be based on level description or a new DB field

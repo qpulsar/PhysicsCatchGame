@@ -10,14 +10,15 @@ This tab works over the root-level `assets/` directory (not per-game) and provid
 from __future__ import annotations
 
 import os
+import sys
 import json
 import unicodedata
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import Dict, Optional, List
 
-from PIL import Image, ImageTk, ImageDraw
-from ...utils import format_filetypes_for_dialog
+from PIL import Image, ImageDraw
+from ...utils import format_filetypes_for_dialog, get_project_root, pil_to_tkphoto
 
 # Pygame is used only for audio preview (lazy init)
 try:
@@ -49,8 +50,8 @@ class MediaTab:
         self.game_service = game_service
         self.current_game_id: Optional[int] = None  # artık açıklamalarda kullanılmıyor (global)
 
-        # Proje köküne göre assets kökünü belirle (çalışma dizininden bağımsız)
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
+        project_root = get_project_root()
+        
         self.assets_root = os.path.join(project_root, "assets")
         # Klasörler: background, sprite, audio (music), sfx
         self.dir_backgrounds = os.path.join(self.assets_root, "images", "backgrounds")
@@ -305,7 +306,7 @@ class MediaTab:
                 self._draw_gradient_background()
                 img = Image.open(path)
                 img.thumbnail((420, 260), Image.LANCZOS)
-                self._preview_img_ref = ImageTk.PhotoImage(img)
+                self._preview_img_ref = pil_to_tkphoto(img)
                 
                 self.preview_canvas.update_idletasks()
                 cw = self.preview_canvas.winfo_width()
@@ -335,7 +336,7 @@ class MediaTab:
             grad_img.putpixel((0, y), (r, g, b))
             
         full_bg = grad_img.resize((w, h), Image.LANCZOS)
-        self._bg_gradient_ref = ImageTk.PhotoImage(full_bg)
+        self._bg_gradient_ref = pil_to_tkphoto(full_bg)
         self.preview_canvas.create_image(0, 0, anchor="nw", image=self._bg_gradient_ref)
 
     def _update_file_info(self, path: Optional[str]) -> None:
@@ -479,7 +480,7 @@ class MediaTab:
                 bg_img.paste(txt_img, ((cw - tw) // 2, y_offset), txt_img)
                 y_offset += th + 20
 
-            photo = ImageTk.PhotoImage(bg_img)
+            photo = pil_to_tkphoto(bg_img)
             self.preview_canvas.delete("all")
             self.preview_canvas.create_image(0, 0, anchor="nw", image=photo)
             self._preview_img_ref = photo # GC protection

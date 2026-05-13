@@ -6,7 +6,8 @@ import os
 import json
 import sys
 import subprocess
-from PIL import Image, ImageTk
+from PIL import Image
+from ..utils import pil_to_tkphoto
 
 from ..core.models import Game
 from ..core.services import GameService, LevelService, ExpressionService, SpriteService, ScreenService, EffectService, TemplateService
@@ -23,6 +24,7 @@ from .screen_designer import ScreenDesignerWindow
 from .media_manager import MediaManagerWindow
 from .effects_manager import EffectsManagerWindow
 from .sprites_manager import SpritesManagerWindow
+from ..utils import get_project_root, pil_to_tkphoto
 
 
 class GamesListFrame(ttk.Frame):
@@ -141,7 +143,7 @@ class DashboardFrame(ttk.Frame):
         self.effect_service = effect_service
         self.current_game: Optional[Game] = None
         # Proje kökü (assets için mutlak yol çözmekte kullanılır)
-        self._project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+        self._project_root = get_project_root()
         
         # --- Layout ---
         self.columnconfigure(0, weight=1)
@@ -551,7 +553,7 @@ class DashboardFrame(ttk.Frame):
                     try:
                         img = Image.open(abs_path)
                         img.thumbnail(thumb_size, Image.LANCZOS)
-                        img_ref = ImageTk.PhotoImage(img)
+                        img_ref = pil_to_tkphoto(img)
                         preview_lbl.configure(image=img_ref)
                         self._gallery_images.append(img_ref) # Referansı sakla
                     except Exception:
@@ -992,7 +994,7 @@ class MainWindow:
         """Open the standalone Font Manager window."""
         try:
             from .font_manager import FontManagerWindow
-            assets_fonts = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "assets/fonts")
+            assets_fonts = os.path.join(get_project_root(), "assets/fonts")
             FontManagerWindow(self.root, assets_fonts, None)
         except Exception as e:
             messagebox.showerror("Font", f"Pencere açılamadı: {e}")
@@ -1010,7 +1012,7 @@ class MainWindow:
             return
         try:
             # main.py yolunu güvenle oluştur
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            project_root = get_project_root()
             main_path = os.path.join(project_root, "main.py")
             if not os.path.isfile(main_path):
                 raise FileNotFoundError(f"main.py bulunamadı: {main_path}")

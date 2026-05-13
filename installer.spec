@@ -2,30 +2,44 @@
 
 import os
 import sys
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_all, collect_submodules
+import glob
 
 block_cipher = None
 
 # Proje kök dizini
 project_root = os.path.abspath('.')
 
+# Kütüphane yollarını manuel bulalım (Hook'lar bazen yetersiz kalabiliyor)
+import sv_ttk
+import PIL
+sv_ttk_path = os.path.dirname(sv_ttk.__file__)
+pil_path = os.path.dirname(PIL.__file__)
+
 added_files = [
-    ('assets', 'assets'),
-    ('game_data.db', '.'),
     ('settings.py', '.'),
     ('arduino.py', '.'),
     ('effects.py', '.'),
+    ('game_data.db', '.'),
+    # sv_ttk temalarını doğrudan ekle
+    (os.path.join(sv_ttk_path, 'theme'), 'sv_ttk/theme'),
 ]
 
-# sv-ttk verilerini topla
-added_files += collect_data_files('sv_ttk')
+# PIL alt modüllerini ve verilerini topla
+datas_pil, binaries_pil, hidden_pil = collect_all('PIL')
+added_files += datas_pil
+
+# Kritik: _imagingtk modülünü manuel bulup ekle
+pil_binaries = binaries_pil
+for pyd in glob.glob(os.path.join(pil_path, "_imagingtk*")):
+    pil_binaries.append((pyd, 'PIL'))
 
 a = Analysis(
     ['main.py'],
     pathex=[project_root],
-    binaries=[],
+    binaries=pil_binaries,
     datas=added_files,
-    hiddenimports=['pygame', 'serial', 'PIL', 'sv_ttk', 'sqlite3'],
+    hiddenimports=['pygame', 'pygame_ce', 'serial', 'sqlite3', 'numpy', 'tkinter', '_tkinter', 'PIL', 'PIL.Image', 'PIL.ImageTk', 'PIL._imagingtk'] + hidden_pil,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -52,7 +66,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False, # Konsol penceresini gizle
+    console=True, # Konsol penceresini göster (hata ayıklama için)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

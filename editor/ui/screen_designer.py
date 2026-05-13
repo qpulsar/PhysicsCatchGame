@@ -31,9 +31,10 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser, simpledialog
 from typing import Dict, Any, Optional, List
 
-from PIL import Image, ImageTk
+from PIL import Image
 
 from .font_manager import FontManagerWindow
+from ..utils import get_project_root, pil_to_tkphoto
 
 
 class ScreenDesignerWindow(tk.Toplevel):
@@ -88,7 +89,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         self.screen_type = screen_type
         self.on_save_callback = on_save_callback
 
-        self._bg_img_ref: Optional[ImageTk.PhotoImage] = None
+        self._bg_img_ref: Optional[tk.PhotoImage] = None
         self._canvas_bg_path: Optional[str] = None
         self._bg_display_to_path: Dict[str, str] = {}
         self._bg_path_to_display: Dict[str, str] = {}
@@ -102,23 +103,23 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._name_counters = {"label": 0, "button": 0, "sprite": 0}
 
         # Sepet önizlemesi için referanslar
-        self._basket_preview_img_ref: Optional[ImageTk.PhotoImage] = None
+        self._basket_preview_img_ref: Optional[tk.PhotoImage] = None
         self._basket_preview_id: Optional[int] = None
 
         # Düşen item arkaplan önizlemesi için referanslar
-        self._item_preview_img_ref: Optional[ImageTk.PhotoImage] = None
+        self._item_preview_img_ref: Optional[tk.PhotoImage] = None
         self._item_preview_id: Optional[int] = None
         self._item_preview_text_id: Optional[int] = None
         # Çoklu önizleme için dinamik düğümler ve referans listesi
         self._item_preview_nodes: list[tuple[int, int]] = []  # (img_id, text_id)
-        self._item_preview_img_refs: list[ImageTk.PhotoImage] = []
+        self._item_preview_img_refs: list[tk.PhotoImage] = []
 
         # Efekt (yakalama) önizlemesi için durum
         self._effect_preview_id: Optional[int] = None
         self._effect_timer: Optional[str] = None  # after id
-        self._effect_frames_ok: list[ImageTk.PhotoImage] = []
-        self._effect_frames_bad: list[ImageTk.PhotoImage] = []
-        self._effect_current_list: list[ImageTk.PhotoImage] = []
+        self._effect_frames_ok: list[tk.PhotoImage] = []
+        self._effect_frames_bad: list[tk.PhotoImage] = []
+        self._effect_current_list: list[tk.PhotoImage] = []
         self._effect_current_index: int = 0
         self._effect_cycle_kind: str = "ok"  # ok -> bad -> ok ...
         # EffectService tabanlı efekt tanımları için haritalar
@@ -866,7 +867,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         vsb.pack(side="right", fill="y")
 
         # Resim referanslarını canlı tutmak için liste
-        thumbs: List[ImageTk.PhotoImage] = []
+        thumbs: List[tk.PhotoImage] = []
         # ÖNEMLİ: Referansları dlg nesnesine bağla ki Garbage Collector temizlemesin
         dlg.image_refs = thumbs 
 
@@ -928,7 +929,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                                 new_h = max(1, int(src_h * ratio))
                                 
                                 pil_thumb = pil_crop.resize((new_w, new_h), Image.LANCZOS)
-                                thumb = ImageTk.PhotoImage(pil_thumb)
+                                thumb = pil_to_tkphoto(pil_thumb)
                                 thumbs.append(thumb) # Listeye ekle
                                 
                                 # Canvas ortasına çiz
@@ -1015,7 +1016,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         wrap = ttk.Frame(self.level_bg_preview_frame)
         wrap.pack(fill="x", expand=True)
         
-        self._bg_prev_refs: List[ImageTk.PhotoImage] = []
+        self._bg_prev_refs: List[tk.PhotoImage] = []
 
         # Liste öğelerini oluştur
         for reg in show:
@@ -1040,7 +1041,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                         scale = min(tw / max(1, pil_crop.width), th / max(1, pil_crop.height))
                         rz = (max(1, int(pil_crop.width * scale)), max(1, int(pil_crop.height * scale)))
                         pil_thumb = pil_crop.resize(rz, Image.LANCZOS)
-                        thumb = ImageTk.PhotoImage(pil_thumb)
+                        thumb = pil_to_tkphoto(pil_thumb)
                         self._bg_prev_refs.append(thumb)
 
                 # Her bir öğe için tam genişlikte bir satır (cell)
@@ -1166,7 +1167,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         pad_x, pad_y = 16, 10
 
         # Her region için scaled görsel boyutunu hesapla ve toplam genişliği bul
-        previews: list[tuple[int,int,ImageTk.PhotoImage]] = []  # (w,h,photo)
+        previews: list[tuple[int,int,tk.PhotoImage]] = []  # (w,h,photo)
         spacing = 16
         for reg in region_list:
             entry = {
@@ -1185,7 +1186,7 @@ class ScreenDesignerWindow(tk.Toplevel):
             new_w = max(1, int(bg_w * scale * self.zoom))
             new_h = max(1, int(bg_h * scale * self.zoom))
             pil_scaled = pil_crop.resize((new_w, new_h), Image.LANCZOS)
-            photo = ImageTk.PhotoImage(pil_scaled)
+            photo = pil_to_tkphoto(pil_scaled)
             previews.append((new_w, new_h, photo))
         if not previews:
             return
@@ -1221,7 +1222,7 @@ class ScreenDesignerWindow(tk.Toplevel):
             w = max(1, int(self.CANVAS_W * self.zoom))
             h = max(1, int(self.CANVAS_H * self.zoom))
             img = img.resize((w, h), Image.LANCZOS)
-            self._bg_img_ref = ImageTk.PhotoImage(img)
+            self._bg_img_ref = pil_to_tkphoto(img)
             self.canvas.delete("__bg__")
             self.canvas.create_image(0, 0, anchor="nw", image=self._bg_img_ref, tags=("__bg__",))
             self._canvas_bg_path = path
@@ -1322,7 +1323,7 @@ class ScreenDesignerWindow(tk.Toplevel):
 
         Ek olarak proje kökündeki `img/` klasörünü de fallback olarak tarar.
         """
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+        project_root = get_project_root()
         assets_root = os.path.join(project_root, "assets")
         per_game_root = os.path.join(assets_root, "games", str(self.game_id))
         img_root_fallback = os.path.join(project_root, "img")
@@ -1390,6 +1391,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                 base = os.path.basename(rel) or rel
                 label = base
                 if counts[base] > 1:
+                    project_root = get_project_root()
                     parent = os.path.basename(os.path.dirname(rel)) or os.path.dirname(rel)
                     if parent:
                         label = f"{base} ({parent})"
@@ -1516,7 +1518,7 @@ class ScreenDesignerWindow(tk.Toplevel):
             return None
         if os.path.isabs(rel):
             return rel
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+        project_root = get_project_root()
         return os.path.join(project_root, rel)
 
     def _add_label(self) -> None:
@@ -1565,7 +1567,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         cx, cy = int(self._to_canvas(x)), int(self._to_canvas(y))
         cw, ch = int(self._to_canvas(w)), int(self._to_canvas(h))
         img_zoomed = pil_crop.resize((max(1,cw), max(1,ch)), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(img_zoomed)
+        photo = pil_to_tkphoto(img_zoomed)
         # mevcut primitive'i (rect/image) kaldır ve yeni image ekle
         try:
             self.canvas.delete(it["id"])
@@ -1871,7 +1873,7 @@ class ScreenDesignerWindow(tk.Toplevel):
 
     def _open_font_manager(self):
         """Font yöneticisi penceresini açar."""
-        assets_fonts = os.path.join(os.path.dirname(__file__), "../../assets/fonts")
+        assets_fonts = os.path.join(get_project_root(), "assets/fonts")
         FontManagerWindow(self, assets_fonts, self._on_font_selected)
 
     def _on_font_selected(self, font_name: str):
@@ -1887,12 +1889,12 @@ class ScreenDesignerWindow(tk.Toplevel):
 
     def _render_text_as_image(self, text: str, font_name: str, size: int, color: str) -> Optional[Any]:
         """Custom fontları tasarım ekranında göstermek için metni görsele render eder."""
-        from PIL import Image, ImageDraw, ImageFont, ImageTk
+        from PIL import Image, ImageDraw, ImageFont
         try:
             if font_name in ("Arial", "Courier", "Times"):
                  return None
             
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            project_root = get_project_root()
             font_path = os.path.join(project_root, "assets/fonts", font_name)
             if not os.path.exists(font_path):
                 return None
@@ -1909,14 +1911,14 @@ class ScreenDesignerWindow(tk.Toplevel):
             img = Image.new("RGBA", (max(1, w + 4), max(1, h + 4)), (0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
             draw.text((-bbox[0] + 2, -bbox[1] + 2), text, font=pil_font, fill=color)
-            return ImageTk.PhotoImage(img)
+            return pil_to_tkphoto(img)
         except Exception as e:
             print(f"[Designer] Font render hatası: {e}")
             return None
 
     def _get_available_fonts(self):
         """assets/fonts klasöründeki fontları listeler."""
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+        project_root = get_project_root()
         font_dir = os.path.join(project_root, "assets/fonts")
         fonts = ["Arial", "Courier", "Times"] # Temel sistem fontları
         if os.path.exists(font_dir):
@@ -1997,7 +1999,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         cw, ch = int(self._to_canvas(w)), int(self._to_canvas(h))
         # Create zoomed PhotoImage from crop
         img_zoomed = pil_crop.resize((max(1,cw), max(1,ch)), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(img_zoomed)
+        photo = pil_to_tkphoto(img_zoomed)
         # Replace background primitive with image
         try:
             self.canvas.delete(it["id"])  # remove rect/image
@@ -2093,7 +2095,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         rel = entry.get("image")
         if not rel:
             return None
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+        project_root = get_project_root()
         abs_path = os.path.join(project_root, rel)
         if not os.path.isfile(abs_path):
             return None
@@ -2343,7 +2345,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                 item_font = font
                 if font_name.lower().endswith(".ttf"):
                     try:
-                        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+                        project_root = get_project_root()
                         font_path = os.path.join(project_root, "assets/fonts", font_name)
                         if os.path.exists(font_path):
                             fsize = int(props.get('font_size', 20)) if type_ == 'label' else 18
@@ -2416,7 +2418,7 @@ class ScreenDesignerWindow(tk.Toplevel):
             thumb.thumbnail((320, 240), Image.LANCZOS)
             
             # 5. Klasörü oluştur ve kaydet
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+            project_root = get_project_root()
             preview_dir = os.path.join(project_root, "assets", "previews")
             os.makedirs(preview_dir, exist_ok=True)
             
@@ -2558,7 +2560,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                         pil_crop = self._load_crop_image(entry)
                         if pil_crop is not None:
                             img_zoomed = pil_crop.resize((max(1,cw), max(1,ch)), Image.LANCZOS)
-                            photo = ImageTk.PhotoImage(img_zoomed)
+                            photo = pil_to_tkphoto(img_zoomed)
                             img_id = self.canvas.create_image(cx, cy, anchor="nw", image=photo)
                             try:
                                 # ensure label stays on top of image
@@ -2589,7 +2591,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                         pil_crop = self._load_crop_image(entry)
                         if pil_crop is not None:
                             img_zoomed = pil_crop.resize((max(1,cw), max(1,ch)), Image.LANCZOS)
-                            photo = ImageTk.PhotoImage(img_zoomed)
+                            photo = pil_to_tkphoto(img_zoomed)
                             img_id = self.canvas.create_image(cx, cy, anchor="nw", image=photo)
                     if img_id is None:
                         # Placeholder
@@ -2634,7 +2636,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                     # Resize sprite image by zoom and update
                     pil_crop = it["props"].get("pil_crop")
                     img_zoomed = pil_crop.resize((max(1,cw), max(1,ch)), Image.LANCZOS)
-                    photo = ImageTk.PhotoImage(img_zoomed)
+                    photo = pil_to_tkphoto(img_zoomed)
                     it["props"]["img_ref"] = photo
                     self.canvas.itemconfigure(it["id"], image=photo)
                     self.canvas.coords(it["id"], cx, cy)
@@ -2739,7 +2741,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                 return
 
             img_resized = pil_crop.resize((new_w, new_h), Image.LANCZOS)
-            self._basket_preview_img_ref = ImageTk.PhotoImage(img_resized)
+            self._basket_preview_img_ref = pil_to_tkphoto(img_resized)
 
             # Kanvas öğesini güncelle
             self.canvas.itemconfigure(self._basket_preview_id, image=self._basket_preview_img_ref, state="normal")
@@ -2751,7 +2753,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                 m_scale = min(mw/max(1, pil_crop.width), mh/max(1, pil_crop.height))
                 mnw, mnh = int(pil_crop.width * m_scale), int(pil_crop.height * m_scale)
                 img_mini = pil_crop.resize((mnw, mnh), Image.LANCZOS)
-                self._mini_basket_img_ref = ImageTk.PhotoImage(img_mini)
+                self._mini_basket_img_ref = pil_to_tkphoto(img_mini)
                 self.mini_basket_canvas.delete("all")
                 self.mini_basket_canvas.create_image(mw//2, mh//2, image=self._mini_basket_img_ref)
             except Exception:
@@ -2791,7 +2793,7 @@ class ScreenDesignerWindow(tk.Toplevel):
 
         params_map = getattr(self, "_effect_name_to_params", {}) or {}
 
-        def _build_frames_from_params(name: str, fallback_rel: str) -> list[ImageTk.PhotoImage]:
+        def _build_frames_from_params(name: str, fallback_rel: str) -> list[tk.PhotoImage]:
             params = params_map.get(name)
             if not params:
                 # Herhangi bir parametre eşleşmesi yoksa sheet fallback'ine dön
@@ -2823,7 +2825,7 @@ class ScreenDesignerWindow(tk.Toplevel):
             scale_pct = max(10, min(200, scale_pct))
             target_w = max(16, int(self._to_canvas(int(basket_len * scale_pct / 100.0))))
 
-            frames: list[ImageTk.PhotoImage] = []
+            frames: list[tk.PhotoImage] = []
             for fr in frames_conf:
                 try:
                     x = int(fr.get("x", 0))
@@ -2838,7 +2840,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                     rw = max(1, int(crop.width * scale))
                     rh = max(1, int(crop.height * scale))
                     crop = crop.resize((rw, rh), Image.LANCZOS)
-                    frames.append(ImageTk.PhotoImage(crop))
+                    frames.append(pil_to_tkphoto(crop))
                 except Exception:
                     continue
             if frames:
@@ -2878,7 +2880,7 @@ class ScreenDesignerWindow(tk.Toplevel):
         self._schedule_next_effect_frame()
         self._schedule_mini_effect_frame()
 
-    def _produce_effect_frames(self, name: str, rel_path: str, target_w: Optional[int] = None) -> list[ImageTk.PhotoImage]:
+    def _produce_effect_frames(self, name: str, rel_path: str, target_w: Optional[int] = None) -> list[tk.PhotoImage]:
         """Efekt ismine ve yoluna göre kare listesi üretir. target_w None ise kanvas ölçeğine göre, değilse sabit boyutta üretir."""
         params = self._effect_name_to_params.get(name)
         img_rel = ""
@@ -2912,7 +2914,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                 except:
                     target_w = 64
 
-            frames: list[ImageTk.PhotoImage] = []
+            frames: list[tk.PhotoImage] = []
             for fr in frames_conf:
                 try:
                     x, y, w, h = int(fr.get("x", 0)), int(fr.get("y", 0)), int(fr.get("w", 0)), int(fr.get("h", 0))
@@ -2921,7 +2923,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                     scale = target_w / max(1, crop.width)
                     rw, rh = max(1, int(crop.width * scale)), max(1, int(crop.height * scale))
                     crop = crop.resize((rw, rh), Image.LANCZOS)
-                    frames.append(ImageTk.PhotoImage(crop))
+                    frames.append(pil_to_tkphoto(crop))
                 except: continue
             return frames or self._slice_effect_sheet(img_rel, target_w)
         except:
@@ -3000,13 +3002,13 @@ class ScreenDesignerWindow(tk.Toplevel):
         except Exception:
             pass
 
-    def _slice_effect_sheet(self, rel_path: str, target_w: Optional[int] = None) -> list[ImageTk.PhotoImage]:
+    def _slice_effect_sheet(self, rel_path: str, target_w: Optional[int] = None) -> list[tk.PhotoImage]:
         """Verilen görsel yolundaki 6x5 efekt sheet'ini karelere böler ve `PhotoImage` listesi döndürür.
 
         - Kare sayısı 30 (6 sütun x 5 satır) varsayılır.
         - target_w verilmezse sepetin genişliğine yakın oranda ölçeklenir.
         """
-        frames: list[ImageTk.PhotoImage] = []
+        frames: list[tk.PhotoImage] = []
         try:
             abs_path = self._abs_assets_path(rel_path)
             if not abs_path or not os.path.isfile(abs_path):
@@ -3039,7 +3041,7 @@ class ScreenDesignerWindow(tk.Toplevel):
                     rw = max(1, int(frame.width * scale))
                     rh = max(1, int(frame.height * scale))
                     frame = frame.resize((rw, rh), Image.LANCZOS)
-                    frames.append(ImageTk.PhotoImage(frame))
+                    frames.append(pil_to_tkphoto(frame))
         except Exception:
             return frames
         return frames

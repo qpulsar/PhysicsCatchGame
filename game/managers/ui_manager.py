@@ -15,6 +15,7 @@ from pygame.font import Font
 
 import settings
 from settings import MEDIUM_GRAY
+from ..core.utils import get_resource_path
 
 
 class UIManager:
@@ -47,7 +48,7 @@ class UIManager:
         # Help menu anchor position: 'top-right' | 'top-left'
         self.help_area: str = 'top-right'
         self._font_cache: dict[str, pygame.font.Font] = {}
-        self._fonts_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets', 'fonts')
+        self._fonts_root = get_resource_path(os.path.join('assets', 'fonts'))
         self._load_ui_elements()
     
     def _load_ui_elements(self) -> None:
@@ -60,7 +61,7 @@ class UIManager:
             - Silently continues if assets can't be loaded
         """
         try:
-            help_img_path = os.path.join('img', 'button_help.png')
+            help_img_path = get_resource_path(os.path.join('img', 'button_help.png'))
             if os.path.exists(help_img_path):
                 self.help_button_img = pygame.image.load(help_img_path).convert_alpha()
                 self.help_button_img = pygame.transform.scale(
@@ -72,7 +73,7 @@ class UIManager:
             self.help_button_img = None
 
         try:
-            bg_path = os.path.join('img', 'backgrounds', '6.jpg')
+            bg_path = get_resource_path(os.path.join('img', 'backgrounds', '6.jpg'))
             if os.path.exists(bg_path):
                 self.help_menu_bg = pygame.image.load(bg_path).convert()
         except (pygame.error, FileNotFoundError) as e:

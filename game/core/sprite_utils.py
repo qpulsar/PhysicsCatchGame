@@ -2,17 +2,20 @@ from PIL import Image
 import pygame
 import os
 
-SPRITE_SHEET_PATH = os.path.join('img', 'buttons.png')
+from .utils import get_resource_path
+
+SPRITE_SHEET_PATH = get_resource_path(os.path.join('img', 'buttons.png'))
 
 def load_buttons_from_sheet():
     """Sprite sheet'ten 10 adet buton döndürür (2 sütun x 5 satır).
 
     Dosya bulunamazsa boş liste döndürür; böylece çağıran kod fallback'e geçebilir.
     """
-    if not os.path.exists(SPRITE_SHEET_PATH):
+    path = SPRITE_SHEET_PATH
+    if not os.path.exists(path):
         return []
     try:
-        sheet = Image.open(SPRITE_SHEET_PATH).convert('RGBA')
+        sheet = Image.open(path).convert('RGBA')
     except Exception:
         return []
     # Koordinatlar: (left, upper, right, lower)
