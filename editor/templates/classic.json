@@ -1,7 +1,7 @@
 {
   "id": "classic",
   "name": "Klasik Yakalama",
-  "description": "Lush bir orman atmosferinde, temel fiziksel büyüklükleri sepetinizle yakalayın.",
+  "description": "Doğa içerisinde fiziksel büyüklükleri sepetinize toplayın.",
   "settings": {
     "total_levels": "5",
     "default_wrong_percentage": "20",
@@ -9,18 +9,44 @@
     "default_max_items": "5",
     "music_path": "assets/audio/classic_bg.mp3",
     "catch_sound_path": "assets/audio/catch_classic.mp3",
-    "miss_sound_path": "assets/audio/miss.mp3"
+    "miss_sound_path": "assets/audio/miss.mp3",
+    "basket_sprite": "assets/sprites/wicker_basket.png"
   },
   "screens": [
     {
       "name": "opening",
       "type": "opening",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Klasik Yakalama\", \"x\": 400, \"y\": 150, \"color\": \"#FFFFFF\", \"size\": 56, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Fiziksel Büyüklükleri Toplayın!\", \"x\": 400, \"y\": 220, \"color\": \"#E0E0E0\", \"size\": 24, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"OYUNA BAŞLA\", \"x\": 400, \"y\": 380, \"action\": \"start_game\", \"color\": \"#4CAF50\", \"font\": \"Arial\", \"font_size\": 28, \"border_radius\": 10}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Klasik Yakalama\", \"x\": 400, \"y\": 150, \"color\": \"#FFFFFF\", \"size\": 60, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"OYUNA BA\\u015eLA\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"color\": \"#4CAF50\", \"font\": \"Arial\", \"font_size\": 28, \"border_radius\": 15}]}"
     },
     {
-      "name": "game_over",
-      "type": "game_over",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"OYUN BİTTİ\", \"x\": 400, \"y\": 200, \"color\": \"#FF5252\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"ANA MENÜ\", \"x\": 400, \"y\": 400, \"action\": \"back_to_menu\", \"color\": \"#607D8B\", \"font\": \"Arial\", \"font_size\": 24}]}"
+      "name": "victory",
+      "type": "victory",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"TEBR\\u0130KLER!\", \"x\": 400, \"y\": 120, \"color\": \"#4CAF50\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Skor: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 260, \"color\": \"#FFD700\", \"size\": 36, \"font\": \"Arial\"}, {\"type\": \"label\", \"text\": \"Yakalanan: {caught} / {total}\", \"x\": 400, \"y\": 320, \"color\": \"#E0E0E0\", \"size\": 28, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"SONRAK\\u0130 SEV\\u0130YE\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"color\": \"#FF9800\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 15}]}"
+    },
+    {
+      "name": "defeat",
+      "type": "defeat",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"OYUN B\\u0130TT\\u0130\", \"x\": 400, \"y\": 150, \"color\": \"#FF5252\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Toplam Skor: {score}\", \"x\": 400, \"y\": 290, \"color\": \"#FFD700\", \"size\": 36, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"ANA MEN\\u00dc\", \"x\": 400, \"y\": 420, \"action\": \"back_to_menu\", \"color\": \"#607D8B\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 10}]}"
+    },
+    {
+      "name": "level_1_info",
+      "type": "info",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"1. SEV\\u0130YE\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Ormanda Y\\u00fcr\\u00fcy\\u00fc\\u015f\", \"x\": 400, \"y\": 200, \"color\": \"#FFD700\", \"size\": 32, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#2196F3\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 12}]}"
+    },
+    {
+      "name": "level_1",
+      "type": "playing",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": []}"
+    },
+    {
+      "name": "level_2_info",
+      "type": "info",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"2. SEV\\u0130YE\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Daha H\\u0131zl\\u0131 Kararlar\", \"x\": 400, \"y\": 200, \"color\": \"#FFD700\", \"size\": 32, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#2196F3\", \"font\": \"Arial\", \"font_size\": 24, \"border_radius\": 12}]}"
+    },
+    {
+      "name": "level_2",
+      "type": "playing",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/classic_forest.png\"}, \"widgets\": []}"
     }
   ],
   "levels": [
@@ -34,31 +60,58 @@
         "max_items_on_screen": 4
       },
       "expressions": [
-        {"text": "Kütle", "correct": true},
-        {"text": "Zaman", "correct": true},
-        {"text": "Uzunluk", "correct": true},
-        {"text": "Hız", "correct": true},
-        {"text": "Masa", "correct": false},
-        {"text": "Kalem", "correct": false},
-        {"text": "Araba", "correct": false}
+        {
+          "text": "Kütle",
+          "correct": true
+        },
+        {
+          "text": "Zaman",
+          "correct": true
+        },
+        {
+          "text": "Uzunluk",
+          "correct": true
+        },
+        {
+          "text": "Hız",
+          "correct": false
+        },
+        {
+          "text": "İvme",
+          "correct": false
+        }
       ]
     },
     {
       "number": 2,
-      "name": "Hızlanıyoruz",
-      "description": "Daha hızlı kararlar vermeniz gerekecek.",
+      "name": "Ormanın Derinlikleri",
+      "description": "Biraz daha karmaşık kavramlara hazır olun.",
       "settings": {
-        "wrong_answer_percentage": 25,
-        "item_speed": 2.5,
+        "wrong_answer_percentage": 20,
+        "item_speed": 2.1,
         "max_items_on_screen": 5
       },
       "expressions": [
-        {"text": "Kuvvet", "correct": true},
-        {"text": "Enerji", "correct": true},
-        {"text": "Güç", "correct": true},
-        {"text": "Ağırlık", "correct": true},
-        {"text": "Defter", "correct": false},
-        {"text": "Gözlük", "correct": false}
+        {
+          "text": "Kuvvet",
+          "correct": true
+        },
+        {
+          "text": "Enerji",
+          "correct": true
+        },
+        {
+          "text": "Güç",
+          "correct": true
+        },
+        {
+          "text": "Ağırlık",
+          "correct": false
+        },
+        {
+          "text": "Sıcaklık",
+          "correct": false
+        }
       ]
     }
   ]

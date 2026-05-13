@@ -106,31 +106,32 @@ def get_new_item(level):
     return text, item_type
 
 def draw_spline(surface, start, end, progress, color, width=3):
-    """Draws a quadratic bezier curve from start to end based on progress."""
+    """Draws a smooth cubic bezier curve from start to end based on progress."""
     if progress <= 0:
         return start
         
-    # Control point: creates a nice 'organic' curve
-    # Using a mix of start and end to make it more natural
-    control = (start[0], end[1]) 
+    # S-curve control points for cubic Bezier
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    
+    # Elegant outward-then-down/up curve
+    cp1 = (start[0] + dx * 0.5, start[1] + dy * 0.1)
+    cp2 = (start[0] + dx * 0.5, end[1] - dy * 0.1)
     
     points = []
-    steps = 24
+    steps = 32
     max_t = max(0.0, min(1.0, progress))
     
     for i in range(steps + 1):
         t = (i / steps) * max_t
-        # Bezier formula: (1-t)^2 * P0 + 2(1-t)t * P1 + t^2 * P2
         inv_t = 1.0 - t
-        x = inv_t**2 * start[0] + 2*inv_t*t * control[0] + t**2 * end[0]
-        y = inv_t**2 * start[1] + 2*inv_t*t * control[1] + t**2 * end[1]
+        # Cubic Bezier formula
+        x = (inv_t**3)*start[0] + 3*(inv_t**2)*t*cp1[0] + 3*inv_t*(t**2)*cp2[0] + (t**3)*end[0]
+        y = (inv_t**3)*start[1] + 3*(inv_t**2)*t*cp1[1] + 3*inv_t*(t**2)*cp2[1] + (t**3)*end[1]
         points.append((x, y))
     
     if len(points) > 1:
-        # Create a temporary surface for alpha if needed, but pygame.draw.lines is fine for now
-        # If color has alpha, we might need a different approach
         if len(color) > 3:
-            # Draw with alpha
             alpha_surf = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
             pygame.draw.lines(alpha_surf, color, False, points, width)
             surface.blit(alpha_surf, (0, 0))

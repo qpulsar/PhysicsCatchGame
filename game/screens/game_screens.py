@@ -283,7 +283,7 @@ class Carousel:
         # Thumbnail boyutlarını sabitle: 150x150
         self.card_w = 150
         self.card_h = 150
-        self.card_spacing = self.card_w + CARD_GAP
+        self.card_spacing = self.card_w + 120  # Increased gap significantly to prevent branch overlap
         self.cards = self._create_cards()
         self.target_x = SCREEN_WIDTH / 2
         self.current_x = self.target_x
@@ -349,9 +349,7 @@ class Carousel:
 
     def get_card_rect(self, index: int) -> pygame.Rect:
         """Calculates the rect for a given card index based on current_x."""
-        # Kartın merkezi current_x ve offset'e göre hesaplanır
-        offset = (index - self.selected_index) * self.card_spacing + (self.current_x - SCREEN_WIDTH / 2)
-        center_x = SCREEN_WIDTH / 2 + offset
+        center_x = self.current_x + index * self.card_spacing
         
         dist = abs(center_x - SCREEN_WIDTH / 2)
         scale = max(0.5, 1.0 - (dist / (SCREEN_WIDTH * 0.75)) * 0.5)
@@ -386,8 +384,7 @@ class Carousel:
 
         for i in sorted_indices:
             card = self.cards[i]
-            offset = (i - self.selected_index) * self.card_spacing + (self.current_x - SCREEN_WIDTH / 2)
-            center_x = SCREEN_WIDTH / 2 + offset
+            center_x = self.current_x + i * self.card_spacing
             
             dist_from_center = abs(center_x - SCREEN_WIDTH / 2)
             scale = max(0.5, 1.0 - (dist_from_center / (SCREEN_WIDTH * 0.75)) * 0.5)
@@ -509,8 +506,8 @@ def _draw_level_tree(screen, center_rect: pygame.Rect, levels: list, progress: f
 
     center_x, center_y = center_rect.center
     
-    # Dalların uzunluğu
-    radius = 130
+    # Dalların uzunluğu (Optimal seviyeye çekildi)
+    radius = 180
     
     # Font
     font = pygame.font.Font(None, 24)
@@ -547,42 +544,43 @@ def _draw_level_tree(screen, center_rect: pygame.Rect, levels: list, progress: f
             
             # Pulse efekti (zaman bazlı)
             pulse = (math.sin(pygame.time.get_ticks() * 0.005) + 1) * 0.5
-            pulse_radius = 6 + pulse * 4
+            pulse_radius = 8 + pulse * 5  # Düğümler biraz daha büyük ve belirgin
             
             # Dış ışıma
-            pygame.draw.circle(surf, (100, 100, 255, int(50 * node_p)), (int(tip_pos[0]), int(tip_pos[1])), int(pulse_radius + 4))
+            pygame.draw.circle(surf, (100, 100, 255, int(60 * node_p)), (int(tip_pos[0]), int(tip_pos[1])), int(pulse_radius + 5))
             # Ana düğüm
-            pygame.draw.circle(surf, (*CARD_SELECTED_COLOR, node_alpha), (int(tip_pos[0]), int(tip_pos[1])), 6)
-            pygame.draw.circle(surf, (255, 255, 255, node_alpha), (int(tip_pos[0]), int(tip_pos[1])), 3)
+            pygame.draw.circle(surf, (*CARD_SELECTED_COLOR, node_alpha), (int(tip_pos[0]), int(tip_pos[1])), 8)
+            pygame.draw.circle(surf, (255, 255, 255, node_alpha), (int(tip_pos[0]), int(tip_pos[1])), 4)
             
             # Metin
             level_name = level.get('level_name', str(level.get('level_number')))
             text_surf = font.render(level_name, True, TEXT_COLOR)
             text_surf.set_alpha(node_alpha)
             
-            t_offset = 28
+            t_offset = 34  # Yazı mesafesini biraz daha açtık
             tx = tip_pos[0] + t_offset * math.cos(rad)
             ty = tip_pos[1] + t_offset * math.sin(rad)
             text_rect = text_surf.get_rect(center=(tx, ty))
             
-            bg_rect = text_rect.inflate(14, 8)
+            bg_rect = text_rect.inflate(18, 10)
             # Metin arkaplanı (yuvarlatılmış)
             bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-            pygame.draw.rect(bg_surf, (20, 20, 40, int(200 * node_p)), bg_surf.get_rect(), border_radius=6)
+            pygame.draw.rect(bg_surf, (20, 20, 45, int(220 * node_p)), bg_surf.get_rect(), border_radius=8)
+            pygame.draw.rect(bg_surf, (100, 100, 255, int(100 * node_p)), bg_surf.get_rect(), border_radius=8, width=1) # Hafif bir sınır ekledik
             surf.blit(bg_surf, bg_rect.topleft)
             surf.blit(text_surf, text_rect)
 
-    # Yukarıdakiler
+    # Yukarıdakiler (Dengeli açı yayılımı)
     if upper_levels:
         count = len(upper_levels)
-        angles = [-90] if count == 1 else [(-140 + i * (100 / (count - 1))) for i in range(count)]
+        angles = [-90] if count == 1 else [(-135 + i * (90 / (count - 1))) for i in range(count)]
         for i, lvl in enumerate(upper_levels):
             draw_branch(tree_surf, lvl, angles[i], progress)
 
-    # Aşağıdakiler
+    # Aşağıdakiler (Dengeli açı yayılımı)
     if lower_levels:
         count = len(lower_levels)
-        angles = [90] if count == 1 else [(40 + i * (100 / (count - 1))) for i in range(count)]
+        angles = [90] if count == 1 else [(45 + i * (90 / (count - 1))) for i in range(count)]
         for i, lvl in enumerate(lower_levels):
             draw_branch(tree_surf, lvl, angles[i], progress)
 

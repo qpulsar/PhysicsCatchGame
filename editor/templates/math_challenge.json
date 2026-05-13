@@ -1,61 +1,117 @@
 {
   "id": "math_challenge",
   "name": "Matematik Yarışı",
-  "description": "Dijital bir tahta üzerinde, hızlı matematiksel işlemleri en kısa sürede çözün.",
+  "description": "Tahtaya düşen formülleri ve sayıları toplayarak zekanı test et.",
   "settings": {
     "total_levels": "5",
-    "default_wrong_percentage": "35",
-    "default_item_speed": "3.2",
+    "default_wrong_percentage": "30",
+    "default_item_speed": "2.8",
     "default_max_items": "6",
     "music_path": "assets/audio/math_bg.mp3",
     "catch_sound_path": "assets/audio/catch_math.mp3",
-    "miss_sound_path": "assets/audio/miss.mp3"
+    "miss_sound_path": "assets/audio/miss.mp3",
+    "basket_sprite": "assets/sprites/sci_fi_container.png"
   },
   "screens": [
     {
       "name": "opening",
       "type": "opening",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Matematik Ustası\", \"x\": 400, \"y\": 150, \"color\": \"#FFD700\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Hızlı İşlemleri Yakala!\", \"x\": 400, \"y\": 230, \"color\": \"#FFFFFF\", \"size\": 26, \"font\": \"Arial\"}, {\"type\": \"button\", \"text\": \"YARIŞA BAŞLA\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"color\": \"#2196F3\", \"font\": \"Arial\", \"font_size\": 30, \"border_radius\": 5}]}"
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"Matematik Yar\\u0131\\u015f\\u0131\", \"x\": 400, \"y\": 140, \"color\": \"#FFFFFF\", \"size\": 60, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"TESTE BA\\u015eLA\", \"x\": 400, \"y\": 400, \"action\": \"start_game\", \"color\": \"#009688\", \"font\": \"Righteous\", \"font_size\": 26, \"border_radius\": 12}]}"
     },
     {
-      "name": "game_over",
-      "type": "game_over",
-      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SÜRE BİTTİ\", \"x\": 400, \"y\": 200, \"color\": \"#FF5252\", \"size\": 64, \"font\": \"Arial\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"TEKRAR DENE\", \"x\": 400, \"y\": 400, \"action\": \"back_to_menu\", \"color\": \"#FF9800\", \"font\": \"Arial\", \"font_size\": 24}]}"
+      "name": "victory",
+      "type": "victory",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"A+\", \"x\": 400, \"y\": 110, \"color\": \"#4CAF50\", \"size\": 80, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Puan: {score}  |  S\\u00fcre: {time}s\", \"x\": 400, \"y\": 260, \"color\": \"#FFEB3B\", \"size\": 32, \"font\": \"Righteous\"}, {\"type\": \"label\", \"text\": \"Do\\u011frular: {caught} / {total}\", \"x\": 400, \"y\": 320, \"color\": \"#4DD0E1\", \"size\": 26, \"font\": \"Righteous\"}, {\"type\": \"button\", \"text\": \"SIRADAK\\u0130 SORU\", \"x\": 400, \"y\": 440, \"action\": \"next_level\", \"color\": \"#00BCD4\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 12}]}"
+    },
+    {
+      "name": "defeat",
+      "type": "defeat",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"SINIFTA KALDIN\", \"x\": 400, \"y\": 150, \"color\": \"#F44336\", \"size\": 60, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"label\", \"text\": \"Toplam Puan: {score}\", \"x\": 400, \"y\": 300, \"color\": \"#FFC107\", \"size\": 36, \"font\": \"Righteous\"}, {\"type\": \"button\", \"text\": \"TEKRAR \\u00c7ALI\\u015e\", \"x\": 400, \"y\": 430, \"action\": \"back_to_menu\", \"color\": \"#795548\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 10}]}"
+    },
+    {
+      "name": "level_1_info",
+      "type": "info",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"DERS 1\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#FF5722\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 12}]}"
+    },
+    {
+      "name": "level_1",
+      "type": "playing",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": []}"
+    },
+    {
+      "name": "level_2_info",
+      "type": "info",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": [{\"type\": \"label\", \"text\": \"DERS 2\", \"x\": 400, \"y\": 120, \"color\": \"#FFFFFF\", \"size\": 48, \"font\": \"Righteous\", \"shadow\": true}, {\"type\": \"button\", \"text\": \"BA\\u015eLA\", \"x\": 400, \"y\": 450, \"action\": \"close_info\", \"color\": \"#FF5722\", \"font\": \"Righteous\", \"font_size\": 24, \"border_radius\": 12}]}"
+    },
+    {
+      "name": "level_2",
+      "type": "playing",
+      "data_json": "{\"background\": {\"image\": \"assets/bg/math_blackboard.png\"}, \"widgets\": []}"
     }
   ],
   "levels": [
     {
       "number": 1,
-      "name": "Hızlı Toplamlar",
-      "description": "Basit toplama işlemlerini yakalayın.",
+      "name": "Çift Sayılar",
+      "description": "Sadece çift sayıları yakala.",
       "settings": {
-        "wrong_answer_percentage": 30,
-        "item_speed": 2.8,
-        "max_items_on_screen": 5
+        "wrong_answer_percentage": 25,
+        "item_speed": 2.2,
+        "max_items_on_screen": 6
       },
       "expressions": [
-        {"text": "15 + 7 = 22", "correct": true},
-        {"text": "9 + 6 = 15", "correct": true},
-        {"text": "25 + 25 = 50", "correct": true},
-        {"text": "4 + 8 = 13", "correct": false},
-        {"text": "10 + 2 = 11", "correct": false}
+        {
+          "text": "2",
+          "correct": true
+        },
+        {
+          "text": "4",
+          "correct": true
+        },
+        {
+          "text": "8",
+          "correct": true
+        },
+        {
+          "text": "3",
+          "correct": false
+        },
+        {
+          "text": "7",
+          "correct": false
+        }
       ]
     },
     {
       "number": 2,
-      "name": "Çıkarma Zamanı",
-      "description": "Hız artıyor, dikkatli olun!",
+      "name": "Asal Sayılar",
+      "description": "Sadece asal sayıları bul.",
       "settings": {
-        "wrong_answer_percentage": 40,
-        "item_speed": 3.5,
+        "wrong_answer_percentage": 28,
+        "item_speed": 2.5,
         "max_items_on_screen": 6
       },
       "expressions": [
-        {"text": "100 - 45 = 55", "correct": true},
-        {"text": "60 - 12 = 48", "correct": true},
-        {"text": "30 - 15 = 15", "correct": true},
-        {"text": "50 - 25 = 30", "correct": false},
-        {"text": "20 - 7 = 14", "correct": false}
+        {
+          "text": "2",
+          "correct": true
+        },
+        {
+          "text": "3",
+          "correct": true
+        },
+        {
+          "text": "5",
+          "correct": true
+        },
+        {
+          "text": "4",
+          "correct": false
+        },
+        {
+          "text": "6",
+          "correct": false
+        }
       ]
     }
   ]
